@@ -224,10 +224,10 @@ const DEFAULT_RATES = {
     { type:'PRIMED', price:0 },{ type:'SPRAY', price:0 },{ type:'NONE', price:0 },{ type:'BESPOKE', price:40 },{ type:'TBC', price:0 },
   ],
   overPanels: [
-    { formCode:'SASL', fire:'NFR', type:'SOLID', laminate:189.01, spray:0 },
-    { formCode:'SASL', fire:'NFR', type:'GLAZED', laminate:177.22, spray:0 },
-    { formCode:'SASL', fire:'FD30', type:'SOLID', laminate:199.85, spray:0 },
-    { formCode:'SASL', fire:'FD30', type:'GLAZED', laminate:211.65, spray:0 },
+    { formCode:'SASL', fire:'NFR', type:'SOLID', primed:0, laminate:189.01, veneer:0, spray:0 },
+    { formCode:'SASL', fire:'NFR', type:'GLAZED', primed:0, laminate:177.22, veneer:0, spray:0 },
+    { formCode:'SASL', fire:'FD30', type:'SOLID', primed:0, laminate:199.85, veneer:0, spray:0 },
+    { formCode:'SASL', fire:'FD30', type:'GLAZED', primed:0, laminate:211.65, veneer:0, spray:0 },
   ],
   hardware: {
     hinges: [
@@ -550,8 +550,8 @@ function createDoor() {
   return {
     id: state.nextId++,
     doorId: '', customerType: '', doorType: '', width: '', height: '',
-    handing: 'N/A', fireRating: 'FD30', vp: 0, vpSize: '', doorFinish: 'SPRAY',
-    frameFinish: 'SPRAY', archFinish: 'NONE', overPanel: 'NONE',
+    handing: 'N/A', fireRating: 'FD30', vp: 0, vpSize: '', doorFinish: 'PRIMED',
+    frameFinish: 'PRIMED', archFinish: 'NONE', overPanel: 'NONE',
     hinge: 'None', intumescent: 'None', closer: 'None', lever: 'None',
     pushPull: 'None', lockcase: 'None', escutcheon: 'None', flushBolt: 'None',
     kickPlate: 'None', combiLock: 'None', fingerGuard: 'None', signage: 'None',
@@ -577,9 +577,9 @@ function calcDoorCost(door) {
   const baseFR = getBaseFireRating(door.fireRating);
   const rate = state.rates.doors.find(d => d.desc === door.doorType && d.fire === baseFR);
   if (!rate) return 0;
-  if (door.doorFinish === 'SPRAY') return rate.primed + rate.sprayAdd;
+  if (door.doorFinish === 'SPRAY') return (parseFloat(rate.primed)||0) + (parseFloat(rate.sprayAdd)||0);
   const finishMap = { PRIMED: 'primed', LAMINATE: 'laminate', VENEER: 'veneer' };
-  return rate[finishMap[door.doorFinish]] || 0;
+  return parseFloat(rate[finishMap[door.doorFinish]]) || 0;
 }
 
 function calcFrameCost(door) {
@@ -608,8 +608,10 @@ function calcOverPanelCost(door) {
   const baseFR = getBaseFireRating(door.fireRating);
   const op = state.rates.overPanels.find(o => o.formCode === fc && o.fire === baseFR && o.type === door.overPanel);
   if (!op) return 0;
-  // Use laminate as default price, spray if spray finish
-  return door.doorFinish === 'SPRAY' ? (op.spray || op.laminate || 0) : (op.laminate || 0);
+  // Match the door's finish to the over panel price column
+  const finishMap = { PRIMED:'primed', LAMINATE:'laminate', VENEER:'veneer', SPRAY:'spray' };
+  const key = finishMap[door.doorFinish] || 'laminate';
+  return op[key] || op.laminate || 0;
 }
 
 function calcHardwareCost(door) {
@@ -699,7 +701,7 @@ function sel(idx, field, options, currentVal, extraClass) {
   for (const opt of options) {
     const val = typeof opt === 'object' ? opt.value : opt;
     const label = typeof opt === 'object' ? opt.label : opt;
-    const selected = (val === currentVal) ? ' selected' : '';
+    const selected = (val == currentVal) ? ' selected' : '';
     html += `<option value="${esc(val)}"${selected}>${esc(label)}</option>`;
   }
   html += '</select>';
@@ -957,6 +959,8 @@ function renderSchedule() {
     const doorVP = dc + vc;
     const sell = calcSellPrice(d);
     const warnTip = warnings.length ? ` title="${esc(warnings.join('\n'))}"` : '';
+    // Build cost breakdown tooltip
+    const costTip = `Door: ${fmt(dc)} (${d.doorType||'?'}, ${d.fireRating}, ${d.doorFinish})\\nVP: ${fmt(vc)} (${d.vp} panels)`;
 
     leftRows += `<tr class="${rowClass}">
       <td style="width:36px"><span class="delete-row" onclick="deleteDoor(${idx})" title="Delete row">&times;</span><span class="copy-row" onclick="copyDoor(${idx})" title="Copy row">&#x2398;</span></td>
@@ -965,7 +969,7 @@ function renderSchedule() {
     </tr>`;
 
     rightRows += `<tr class="${rowClass}">
-      <td>${fmt(doorVP)}</td>
+      <td title="${costTip}" style="cursor:help">${fmt(doorVP)}</td>
       <td>${fmt(fc)}</td>
       <td>${fmt(ac)}</td>
       <td>${fmt(oc)}</td>
@@ -1068,6 +1072,8 @@ function copyDoor(idx) {
 const _textOnlyFields = new Set(['doorId','comments','width','height']);
 
 function upd(idx, key, val) {
+  // VP is numeric — keep it as a number so the dropdown matches correctly
+  if (key === 'vp') val = parseInt(val) || 0;
   state.doors[idx][key] = val;
   if (_textOnlyFields.has(key)) {
     // Don't re-render for simple text — just save the value
@@ -1102,6 +1108,8 @@ function renderRates() {
     detailHTML = renderFrameRates();
   } else if (cat === '_architraves') {
     detailHTML = renderArchRates();
+  } else if (cat === '_overPanels') {
+    detailHTML = renderOverPanelRates();
   } else {
     const isCustomCat = !['hinges','closers','intumescents','lockcases','levers','pushPull','combiLocks','escutcheons','flushBolts','kickPlates','fingerGuards','signage','thresholds','dropseals','cylinders','doorStops'].includes(cat);
     detailHTML = `
@@ -1145,6 +1153,9 @@ function renderRates() {
           </div>
           <div class="cat-item ${cat==='_architraves'?'active':''}" onclick="state.rateCategory='_architraves';render()">
             Architrave Rates <span class="count">${state.rates.architraves.length}</span>
+          </div>
+          <div class="cat-item ${cat==='_overPanels'?'active':''}" onclick="state.rateCategory='_overPanels';render()">
+            Over Panel Rates <span class="count">${state.rates.overPanels.length}</span>
           </div>
           ${HW_CATEGORIES.map(c => `
             <div class="cat-item ${cat===c.key?'active':''}" onclick="state.rateCategory='${c.key}';render()">
@@ -1335,6 +1346,59 @@ function addArchRate() {
 function delArchRate(idx) {
   if (state.rates.architraves.length <= 1) { showToast('Cannot delete the last architrave type'); return; }
   state.rates.architraves.splice(idx, 1);
+  render();
+}
+
+function renderOverPanelRates() {
+  const formCodes = [...new Set(state.rates.doors.map(d => d.formCode))];
+  const fireRatings = ['NFR','FD30','FD60'];
+  const panelTypes = ['SOLID','GLAZED'];
+  return `
+    <div class="rates-header">
+      <h3>Over Panel Rates</h3>
+      <button class="btn btn-primary btn-sm" onclick="addOverPanelRate()">+ Add Rate</button>
+    </div>
+    <p style="padding:8px 18px 0;font-size:12px;color:var(--text-muted)">Each row is a price for a specific form code, fire rating, and panel type. The price used depends on the door's finish (Primed, Laminate, Veneer, or Spray). If a finish price is 0, Laminate price is used as fallback.</p>
+    <table class="rate-table">
+      <thead><tr>
+        <th>Form Code</th><th>Fire Rating</th><th>Type</th><th>Primed (&pound;)</th><th>Laminate (&pound;)</th><th>Veneer (&pound;)</th><th>Spray (&pound;)</th><th style="width:50px"></th>
+      </tr></thead>
+      <tbody>${state.rates.overPanels.map((op,i) => `<tr>
+        <td>
+          <select onchange="state.rates.overPanels[${i}].formCode=this.value;render()">
+            ${formCodes.map(fc => `<option value="${esc(fc)}"${fc===op.formCode?' selected':''}>${esc(fc)}</option>`).join('')}
+            ${!formCodes.includes(op.formCode) ? `<option value="${esc(op.formCode)}" selected>${esc(op.formCode)}</option>` : ''}
+          </select>
+        </td>
+        <td>
+          <select onchange="state.rates.overPanels[${i}].fire=this.value;render()">
+            ${fireRatings.map(fr => `<option value="${fr}"${fr===op.fire?' selected':''}>${fr}</option>`).join('')}
+          </select>
+        </td>
+        <td>
+          <select onchange="state.rates.overPanels[${i}].type=this.value;render()">
+            ${panelTypes.map(pt => `<option value="${pt}"${pt===op.type?' selected':''}>${pt}</option>`).join('')}
+          </select>
+        </td>
+        <td><input type="number" step="0.01" value="${op.primed||0}" onchange="state.rates.overPanels[${i}].primed=parseFloat(this.value)||0;render()"></td>
+        <td><input type="number" step="0.01" value="${op.laminate||0}" onchange="state.rates.overPanels[${i}].laminate=parseFloat(this.value)||0;render()"></td>
+        <td><input type="number" step="0.01" value="${op.veneer||0}" onchange="state.rates.overPanels[${i}].veneer=parseFloat(this.value)||0;render()"></td>
+        <td><input type="number" step="0.01" value="${op.spray||0}" onchange="state.rates.overPanels[${i}].spray=parseFloat(this.value)||0;render()"></td>
+        <td><span class="delete-row" onclick="delOverPanelRate(${i})">&times;</span></td>
+      </tr>`).join('')}</tbody>
+    </table>
+  `;
+}
+
+function addOverPanelRate() {
+  const formCodes = [...new Set(state.rates.doors.map(d => d.formCode))];
+  state.rates.overPanels.push({ formCode: formCodes[0] || 'SASL', fire:'FD30', type:'SOLID', primed:0, laminate:0, veneer:0, spray:0 });
+  render();
+  showToast('New over panel rate added');
+}
+
+function delOverPanelRate(idx) {
+  state.rates.overPanels.splice(idx, 1);
   render();
 }
 
