@@ -466,14 +466,20 @@ function saveRatesToFirebase() {
 }
 
 // Save a job to Firebase
-function saveJobToFirebase(job) {
+function saveJobToFirebase(job, existingId) {
   if (!fbReady) return Promise.resolve();
   const data = { ...job };
   delete data._fbId;
   // Stringify large nested objects to avoid Firestore limits
   data.rates = JSON.stringify(data.rates || {});
   data.doors = JSON.stringify(data.doors || []);
-  return db.collection('jobs').add(data);
+  if (existingId) {
+    // Update existing document
+    return db.collection('jobs').doc(existingId).set(data).then(() => existingId);
+  } else {
+    // Create new document
+    return db.collection('jobs').add(data).then(ref => ref.id);
+  }
 }
 
 // Delete a job from Firebase
@@ -541,6 +547,7 @@ let state = {
   savedJobs: [],
   colSize: localStorage.getItem('matrix_col_size') || 'comfortable',
   searchTerm: '',
+  currentJobId: null, // Firebase doc ID of the currently loaded job (null = unsaved/new)
 };
 
 // Load local data first, then connect Firebase
@@ -1032,6 +1039,10 @@ function renderSchedule() {
     <div class="header">
       <h1>Door Schedule &mdash; <span contenteditable="true" onblur="state.projectName=this.textContent" style="border-bottom:1px dashed var(--border);outline:none;padding:0 4px">${esc(state.projectName)}</span></h1>
       <div class="header-actions">
+        <button class="btn btn-success" onclick="quickSave()" title="${state.currentJobId ? 'Update saved project' : 'Save as new project'}" style="font-weight:700">
+          ${state.currentJobId ? '&#128190; Save' : '&#128190; Save New'}
+        </button>
+        <span style="border-left:1px solid var(--border);height:24px;margin:0 4px"></span>
         <input type="text" value="${esc(state.searchTerm)}" oninput="searchDoors(this.value)" placeholder="&#128269; Search doors..." style="width:180px;padding:8px 12px;border:1px solid var(--border);border-radius:5px;font-size:13px" id="searchInput">
         ${state.searchTerm ? `<button class="btn btn-sm btn-outline" onclick="state.searchTerm='';render();setTimeout(()=>{const s=document.getElementById('searchInput');if(s)s.focus()},50)" style="padding:6px 10px" title="Clear search">&times;</button>` : ''}
         <span style="border-left:1px solid var(--border);height:24px;margin:0 4px"></span>
@@ -1915,6 +1926,7 @@ function confirmNewProject() {
   state.doors = [];
   state.nextId = 1;
   state.hiddenCols = new Set();
+  state.currentJobId = null;
   state.modal = null;
   state.page = 'schedule';
   render();
@@ -1959,7 +1971,8 @@ function renderJobs() {
       <h1>Saved Jobs</h1>
       <div class="header-actions">
         <span style="font-size:12px;padding:4px 10px;border-radius:12px;font-weight:600;${fbReady ? 'color:var(--green);background:var(--green-light)' : 'color:var(--text-muted);background:#f0f0f0'}">${fbReady ? '&#9679; Cloud Synced' : '&#9679; Local Only'}</span>
-        <button class="btn btn-primary" onclick="saveCurrentJob()">Save Current Job</button>
+        <button class="btn btn-success" onclick="quickSave()">${state.currentJobId ? '&#128190; Save' : '&#128190; Save New'}</button>
+        <button class="btn btn-primary" onclick="saveCurrentJob()">Save As New</button>
         <button class="btn btn-outline" onclick="document.getElementById('jobFileInput').click()">Import Job File</button>
         <input type="file" id="jobFileInput" accept=".json" style="display:none" onchange="importJobFile(event)">
       </div>
@@ -2007,8 +2020,8 @@ function calcSellPriceForJob(door, job) {
   return 0;
 }
 
-function saveCurrentJob() {
-  const job = {
+function buildJobData() {
+  return {
     projectName: state.projectName,
     markup: state.markup,
     rates: JSON.parse(JSON.stringify(state.rates)),
@@ -2019,16 +2032,51 @@ function saveCurrentJob() {
     savedDateDisplay: new Date().toLocaleString('en-GB'),
     customCategories: HW_CATEGORIES.filter(c => !BUILTIN_HW_KEYS.includes(c.key)),
   };
-  // Save to Firebase if available
+}
+
+// Quick save — updates existing job if loaded, or creates new
+function quickSave() {
+  const job = buildJobData();
   if (fbReady) {
-    saveJobToFirebase(job).then(() => {
-      showToast('Job saved to cloud: ' + state.projectName);
+    saveJobToFirebase(job, state.currentJobId).then((docId) => {
+      if (!state.currentJobId) state.currentJobId = docId;
+      showToast('Saved: ' + state.projectName);
+    }).catch(() => {
+      showToast('Save failed — try again');
+    });
+  } else {
+    // Local save — update existing or add new
+    if (state.currentJobId) {
+      const idx = state.savedJobs.findIndex(j => j._localId === state.currentJobId);
+      if (idx >= 0) state.savedJobs[idx] = { ...job, _localId: state.currentJobId };
+      else { job._localId = state.currentJobId; state.savedJobs.push(job); }
+    } else {
+      const id = 'local_' + Date.now();
+      job._localId = id;
+      state.currentJobId = id;
+      state.savedJobs.push(job);
+    }
+    saveToStorage();
+    showToast('Saved: ' + state.projectName);
+  }
+}
+
+// Save as new job (always creates a new entry)
+function saveCurrentJob() {
+  const job = buildJobData();
+  if (fbReady) {
+    saveJobToFirebase(job, null).then((docId) => {
+      state.currentJobId = docId;
+      showToast('New job saved to cloud: ' + state.projectName);
     }).catch(() => {
       state.savedJobs.push(job);
       render();
       showToast('Job saved locally: ' + state.projectName);
     });
   } else {
+    const id = 'local_' + Date.now();
+    job._localId = id;
+    state.currentJobId = id;
     state.savedJobs.push(job);
     render();
     showToast('Job saved: ' + state.projectName);
@@ -2058,6 +2106,7 @@ function loadSavedJob(idx) {
       }
     }
   }
+  state.currentJobId = job._fbId || null;
   state.page = 'schedule';
   render();
   showToast('Opened: ' + state.projectName);
