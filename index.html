@@ -728,6 +728,16 @@ function render() {
     rightTop: _right ? _right.scrollTop : 0,
   };
 
+  // Flush any in-progress text input to state before rebuild
+  const active0 = document.activeElement;
+  if (active0 && active0.tagName === 'INPUT' && active0.type !== 'number' && active0.type !== 'file') {
+    const match = active0.getAttribute('oninput')?.match(/updText\((\d+),\s*'(\w+)'/);
+    if (match) {
+      const fIdx = parseInt(match[1]), fKey = match[2];
+      if (fIdx >= 0 && fIdx < state.doors.length) state.doors[fIdx][fKey] = active0.value;
+    }
+  }
+
   // Save focused element position (row + column) for tab restore
   let _focusInfo = null;
   const active = document.activeElement;
@@ -835,6 +845,8 @@ function render() {
     }
     // Re-sync row heights after layout is complete
     syncRowHeights();
+    // Re-apply search filter if active
+    if (state.searchTerm) searchDoors(state.searchTerm);
   });
 }
 
@@ -989,21 +1001,7 @@ function renderSchedule() {
   let leftRows = '';
   let rightRows = '';
 
-  // Search filter — match against all door fields
-  const searchLower = state.searchTerm ? state.searchTerm.toLowerCase() : '';
-  function doorMatchesSearch(d) {
-    if (!searchLower) return true;
-    const searchFields = [d.doorId, d.doorType, d.comments, d.fireRating, d.doorFinish, d.frameFinish,
-      d.handing, d.archFinish, d.overPanel, d.hinge, d.intumescent, d.closer, d.lever, d.pushPull,
-      d.lockcase, d.escutcheon, d.flushBolt, d.kickPlate, d.combiLock, d.fingerGuard, d.signage,
-      d.threshold, d.dropseal, d.cylinder, d.doorStop];
-    return searchFields.some(f => f && String(f).toLowerCase().includes(searchLower));
-  }
-
-  let visibleCount = 0;
   state.doors.forEach((d, idx) => {
-    if (!doorMatchesSearch(d)) return;
-    visibleCount++;
     const warnings = getWarnings(d);
     const rowClass = warnings.length ? 'has-warning' : '';
     const dc = calcDoorCost(d), fc = calcFrameCost(d), ac = calcArchCost(d), vc = calcVPCost(d), oc = calcOverPanelCost(d), hc = calcHardwareCost(d);
@@ -1088,7 +1086,7 @@ function renderSchedule() {
       </div>
     </div>
     <div class="summary-bar">
-      <div class="summary-item"><span class="label">Doors:</span><span class="value">${searchLower ? visibleCount + ' / ' + state.doors.length : state.doors.length}</span></div>
+      <div class="summary-item"><span class="label">Doors:</span><span class="value">${state.doors.length}</span></div>
       <div class="summary-item"><span class="label">Total Cost:</span><span class="value">${fmt(totalCost)}</span></div>
       <div class="summary-item"><span class="label">Total Sell (${(state.markup*100).toFixed(0)}% markup):</span><span class="value" style="color:var(--green);font-size:16px">${fmt(totalSell)}</span></div>
     </div>
@@ -1106,13 +1104,29 @@ function searchDoors(val) {
   state.searchTerm = val;
   clearTimeout(_searchTimer);
   _searchTimer = setTimeout(() => {
-    render();
-    // Re-focus search input after render
-    setTimeout(() => {
-      const s = document.getElementById('searchInput');
-      if (s) { s.focus(); s.setSelectionRange(s.value.length, s.value.length); }
-    }, 20);
-  }, 250);
+    // Instead of full re-render, just toggle row visibility for speed
+    const leftTbody = document.querySelector('#scheduleLeft tbody');
+    const rightTbody = document.querySelector('#scheduleRight tbody');
+    if (!leftTbody || !rightTbody) { render(); return; }
+    const searchLow = val.toLowerCase();
+    let visCount = 0;
+    state.doors.forEach((d, i) => {
+      let show = true;
+      if (searchLow) {
+        const fields = [d.doorId, d.doorType, d.comments, d.fireRating, d.doorFinish, d.frameFinish,
+          d.handing, d.archFinish, d.overPanel, d.hinge, d.intumescent, d.closer, d.lever, d.pushPull,
+          d.lockcase, d.escutcheon, d.flushBolt, d.kickPlate, d.combiLock, d.fingerGuard, d.signage,
+          d.threshold, d.dropseal, d.cylinder, d.doorStop];
+        show = fields.some(f => f && String(f).toLowerCase().includes(searchLow));
+      }
+      if (leftTbody.rows[i]) leftTbody.rows[i].style.display = show ? '' : 'none';
+      if (rightTbody.rows[i]) rightTbody.rows[i].style.display = show ? '' : 'none';
+      if (show) visCount++;
+    });
+    // Update door count in summary
+    const countEl = document.querySelector('.summary-item .value');
+    if (countEl) countEl.textContent = searchLow ? visCount + ' / ' + state.doors.length : state.doors.length;
+  }, 150);
 }
 
 function cycleColSize() {
@@ -1152,8 +1166,10 @@ function upd(idx, key, val) {
 
 // For text fields: save on input (no re-render), re-render on blur to update costs
 function updText(idx, key, el) {
-  state.doors[idx][key] = el.value;
-  saveToStorage(); // persist silently
+  if (idx >= 0 && idx < state.doors.length) {
+    state.doors[idx][key] = el.value;
+    saveToStorage(); // persist silently
+  }
 }
 function updTextBlur(idx, key, el) {
   state.doors[idx][key] = el.value;
