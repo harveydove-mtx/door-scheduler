@@ -82,9 +82,11 @@ body { font-family: 'Segoe UI', system-ui, -apple-system, sans-serif; background
 .schedule-scroll tbody tr:hover td { background: #F0F4FF; }
 .schedule-scroll tbody tr.has-warning td { background: var(--red-light); }
 
+/* Column size modes — controlled by CSS class on .schedule-outer */
+.schedule-scroll td { min-width: var(--col-min, 120px); }
 .schedule-scroll td input, .schedule-scroll td select {
   width: 100%; padding: 7px 6px; border: 1px solid var(--border); border-radius: 4px;
-  font-size: 13px; background: white; text-align: center;
+  font-size: 13px; background: white; text-align: center; min-width: var(--input-min, 110px);
 }
 .schedule-scroll td input:focus, .schedule-scroll td select:focus {
   border-color: var(--primary); outline: none; box-shadow: 0 0 0 2px rgba(47,84,150,0.15);
@@ -95,7 +97,15 @@ body { font-family: 'Segoe UI', system-ui, -apple-system, sans-serif; background
   background-repeat: no-repeat; background-position: right 6px center; background-size: 8px 5px;
   padding-right: 18px; text-overflow: ellipsis;
 }
-.schedule-scroll td input[type="number"] { width: 75px; }
+.schedule-scroll td input[type="number"] { width: 75px; min-width: 75px; }
+/* Size presets */
+.size-compact { --col-min: 90px; --input-min: 80px; }
+.size-compact .schedule-scroll td input, .size-compact .schedule-scroll td select { font-size: 12px; padding: 5px 4px; }
+.size-compact .schedule-scroll thead th { padding: 8px 6px; font-size: 11px; }
+.size-compact .schedule-scroll tbody td { padding: 4px 4px; }
+.size-comfortable { --col-min: 140px; --input-min: 130px; }
+.size-spacious { --col-min: 190px; --input-min: 175px; }
+.size-spacious .schedule-scroll td input, .size-spacious .schedule-scroll td select { font-size: 14px; padding: 9px 8px; }
 
 /* Right frozen cost panel */
 .cost-panel { flex-shrink: 0; overflow-y: auto; border-left: 3px solid var(--purple); background: var(--purple-light); }
@@ -495,6 +505,7 @@ let state = {
   hiddenCols: new Set(),
   showColPicker: false,
   savedJobs: [],
+  colSize: localStorage.getItem('matrix_col_size') || 'comfortable',
 };
 
 // Load local data first, then connect Firebase
@@ -860,7 +871,7 @@ function renderSchedule() {
 
   // Column definitions for the left table
   const colDefs = [
-    { key:'doorId',      thClass:'', thLabel:'DOOR ID', thStyle:'', cell: (d,idx) => `<input value="${esc(d.doorId)}" oninput="updText(${idx},'doorId',this)" onblur="updTextBlur(${idx},'doorId',this)" placeholder="e.g. ROOM 14" style="min-width:130px;text-align:left">` },
+    { key:'doorId',      thClass:'', thLabel:'DOOR ID', thStyle:'', cell: (d,idx) => `<input value="${esc(d.doorId)}" oninput="updText(${idx},'doorId',this)" onblur="updTextBlur(${idx},'doorId',this)" placeholder="e.g. ROOM 14" style="min-width:150px;text-align:left">` },
     { key:'doorType',    thClass:'', thLabel:'DOOR TYPE', thStyle:'min-width:220px', cell: (d,idx) => sel(idx, 'doorType', doorTypeOpts, d.doorType) },
     { key:'width',       thClass:'', thLabel:'WIDTH', thStyle:'', cell: (d,idx) => `<input type="number" value="${d.width}" oninput="updText(${idx},'width',this)" onblur="updTextBlur(${idx},'width',this)" placeholder="mm">` },
     { key:'height',      thClass:'', thLabel:'HEIGHT', thStyle:'', cell: (d,idx) => `<input type="number" value="${d.height}" oninput="updText(${idx},'height',this)" onblur="updTextBlur(${idx},'height',this)" placeholder="mm">` },
@@ -944,6 +955,9 @@ function renderSchedule() {
         <button class="btn btn-outline" onclick="state.showColPicker=!state.showColPicker;render()" style="position:relative">
           Columns${state.hiddenCols.size ? ` (${state.hiddenCols.size} hidden)` : ''}
         </button>
+        <button class="btn btn-outline" onclick="cycleColSize()" title="Change column width">
+          ${state.colSize === 'compact' ? '&#9642; Compact' : state.colSize === 'comfortable' ? '&#9644; Comfortable' : '&#9646; Spacious'}
+        </button>
       </div>
     </div>
     ${state.showColPicker ? `
@@ -959,7 +973,7 @@ function renderSchedule() {
       }).join('')}
       <button class="btn btn-sm btn-outline" onclick="state.hiddenCols.clear();render()" style="margin-left:8px">Show All</button>
     </div>` : ''}
-    <div class="schedule-outer">
+    <div class="schedule-outer size-${state.colSize}">
       <!-- LEFT: Scrollable data columns -->
       <div class="schedule-scroll" id="scheduleLeft">
         <table>
@@ -992,6 +1006,14 @@ function renderSchedule() {
 function toggleCol(key) {
   if (state.hiddenCols.has(key)) state.hiddenCols.delete(key);
   else state.hiddenCols.add(key);
+  render();
+}
+
+function cycleColSize() {
+  const sizes = ['compact', 'comfortable', 'spacious'];
+  const idx = sizes.indexOf(state.colSize);
+  state.colSize = sizes[(idx + 1) % sizes.length];
+  localStorage.setItem('matrix_col_size', state.colSize);
   render();
 }
 
