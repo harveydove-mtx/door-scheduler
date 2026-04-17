@@ -79,6 +79,14 @@ body { font-family: 'Segoe UI', system-ui, -apple-system, sans-serif; background
 .schedule-scroll thead th.group-spec { background: var(--green); }
 .schedule-scroll thead th.group-hw { background: var(--accent); }
 .schedule-scroll tbody td { padding: 6px 6px; border-bottom: 1px solid var(--border); text-align: center; vertical-align: middle; }
+/* Frozen Door ID columns — actions col + warning col + doorId col */
+.schedule-scroll thead th.frozen-col { position: sticky; z-index: 12; }
+.schedule-scroll tbody td.frozen-col { position: sticky; z-index: 2; background: var(--card); }
+.schedule-scroll tbody tr:hover td.frozen-col { background: #F0F4FF; }
+.schedule-scroll tbody tr.has-warning td.frozen-col { background: var(--red-light); }
+.frozen-col-0 { left: 0; }
+.frozen-col-1 { left: 36px; }
+.frozen-col-2 { left: 72px; border-right: 2px solid var(--primary) !important; }
 .schedule-scroll tbody tr:hover td { background: #F0F4FF; }
 .schedule-scroll tbody tr.has-warning td { background: var(--red-light); }
 
@@ -121,7 +129,8 @@ body { font-family: 'Segoe UI', system-ui, -apple-system, sans-serif; background
 }
 .cost-panel tbody tr:hover td { background: #EAE0F4; }
 .cost-panel tbody tr.has-warning td { background: #F8E8F0; }
-.cost-panel td.sell-cell { font-weight: 800; color: var(--green); font-size: 14px; background: #EDF5E4 !important; }
+.cost-panel td.sell-cell { font-weight: 800; color: var(--green); font-size: 14px; background: #EDF5E4 !important; position: relative; }
+.cost-panel td.sell-override { background: var(--accent-light) !important; }
 .cost-panel td input[type="number"] {
   width: 80px; padding: 6px; border: 1px solid var(--border); border-radius: 4px;
   font-size: 13px; text-align: center; background: white;
@@ -185,9 +194,84 @@ body { font-family: 'Segoe UI', system-ui, -apple-system, sans-serif; background
 .modal h3 { margin-bottom: 18px; font-size: 18px; }
 .modal-actions { display: flex; gap: 10px; justify-content: flex-end; margin-top: 24px; }
 
+/* Complete door row */
+.schedule-scroll tbody tr.row-complete td { background: #E2EFDA !important; }
+.schedule-scroll tbody tr.row-complete:hover td { background: #D4E8C8 !important; }
+.schedule-scroll tbody tr.row-complete td.frozen-col { background: #E2EFDA !important; }
+.schedule-scroll tbody tr.row-complete:hover td.frozen-col { background: #D4E8C8 !important; }
+.cost-panel tbody tr.row-complete td { background: #E2EFDA !important; }
+.cost-panel tbody tr.row-complete td.sell-cell { background: #D4E8C8 !important; }
+.complete-btn { cursor: pointer; font-size: 14px; opacity: 0.3; padding: 2px; display: block; }
+.complete-btn:hover { opacity: 1; }
+.complete-btn.is-complete { opacity: 1; color: var(--green); }
+
+/* Customer details panel */
+.customer-panel { padding: 14px 28px; background: #F8FBFF; border-bottom: 1px solid var(--border); }
+.customer-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 10px; }
+.customer-field label { display: block; font-size: 11px; font-weight: 600; color: var(--text-muted); margin-bottom: 3px; text-transform: uppercase; letter-spacing: 0.5px; }
+.customer-field input, .customer-field textarea { width: 100%; padding: 7px 10px; border: 1px solid var(--border); border-radius: 4px; font-size: 13px; }
+.customer-field textarea { resize: vertical; min-height: 32px; }
+
+/* Find & Replace panel */
+.find-replace-panel { padding: 14px 28px; background: #FFF8F0; border-bottom: 1px solid var(--border); display: flex; gap: 12px; align-items: flex-end; flex-wrap: wrap; }
+.fr-field label { display: block; font-size: 11px; font-weight: 600; color: var(--text-muted); margin-bottom: 3px; }
+.fr-field select, .fr-field input { padding: 7px 10px; border: 1px solid var(--border); border-radius: 4px; font-size: 13px; min-width: 180px; }
+
+/* Add new product modal */
+.add-product-modal { position: fixed; inset: 0; background: rgba(0,0,0,0.4); display: flex; align-items: center; justify-content: center; z-index: 200; }
+.add-product-form { background: white; border-radius: 10px; padding: 24px; width: 360px; box-shadow: 0 20px 60px rgba(0,0,0,0.2); }
+.add-product-form h3 { margin-bottom: 14px; font-size: 16px; }
+.add-product-form label { display: block; font-size: 12px; font-weight: 600; color: var(--text-muted); margin: 10px 0 4px; }
+.add-product-form input { width: 100%; padding: 8px 10px; border: 1px solid var(--border); border-radius: 4px; font-size: 13px; }
+.add-product-form .form-actions { display: flex; gap: 8px; justify-content: flex-end; margin-top: 16px; }
+
+/* Hardware breakdown tooltip */
+.hw-breakdown-tip { white-space: pre-line; max-width: 280px; }
+
 /* Sync scrolling helper */
 .scroll-sync { scrollbar-width: none; }
 .scroll-sync::-webkit-scrollbar { display: none; }
+
+/* Column filter dropdowns */
+.col-filter-wrap { position: relative; display: inline-block; }
+.col-filter-btn { background: none; border: none; cursor: pointer; font-size: 10px; opacity: 0.4; vertical-align: middle; padding: 0 2px; color: inherit; }
+.col-filter-btn:hover, .col-filter-btn.active { opacity: 1; color: var(--primary); }
+.col-filter-btn.has-filter { opacity: 1; color: var(--accent); }
+.col-filter-dropdown {
+  position: absolute; top: 100%; left: 0; z-index: 50; background: white; border: 1px solid var(--border);
+  border-radius: 6px; box-shadow: 0 8px 24px rgba(0,0,0,0.15); min-width: 180px; max-height: 260px;
+  display: flex; flex-direction: column; font-size: 12px; font-weight: 400; text-align: left;
+}
+.col-filter-dropdown .filter-search { padding: 8px; border-bottom: 1px solid var(--border); }
+.col-filter-dropdown .filter-search input { width: 100%; padding: 5px 8px; border: 1px solid var(--border); border-radius: 4px; font-size: 12px; }
+.col-filter-dropdown .filter-list { overflow-y: auto; max-height: 180px; padding: 4px 0; }
+.col-filter-dropdown label { display: flex; align-items: center; gap: 6px; padding: 4px 10px; cursor: pointer; white-space: nowrap; }
+.col-filter-dropdown label:hover { background: var(--primary-light); }
+.col-filter-dropdown .filter-actions { padding: 6px 8px; border-top: 1px solid var(--border); display: flex; gap: 6px; justify-content: flex-end; }
+.col-filter-dropdown .filter-actions button { font-size: 11px; padding: 3px 10px; border-radius: 4px; cursor: pointer; border: 1px solid var(--border); background: white; }
+.col-filter-dropdown .filter-actions button:hover { background: var(--primary-light); }
+.col-filter-dropdown .filter-actions button.apply-btn { background: var(--primary); color: white; border-color: var(--primary); }
+
+/* Column reorder panel */
+.col-reorder-list { list-style: none; padding: 0; margin: 0; display: flex; flex-wrap: wrap; gap: 4px; }
+.col-reorder-item {
+  display: inline-flex; align-items: center; gap: 4px; padding: 4px 10px; border-radius: 4px;
+  font-size: 12px; cursor: grab; border: 1px solid var(--border); background: white; user-select: none;
+}
+.col-reorder-item:active { cursor: grabbing; }
+.col-reorder-item.dragging { opacity: 0.4; border-style: dashed; }
+.col-reorder-item.drag-over { border-color: var(--primary); background: var(--primary-light); }
+.col-reorder-item .drag-handle { opacity: 0.3; font-size: 11px; cursor: grab; }
+.col-reorder-item:hover .drag-handle { opacity: 0.7; }
+.active-filters-bar {
+  padding: 6px 28px; background: var(--accent-light); border-bottom: 1px solid var(--border);
+  display: flex; flex-wrap: wrap; gap: 6px; align-items: center; font-size: 12px;
+}
+.filter-tag {
+  display: inline-flex; align-items: center; gap: 4px; padding: 3px 8px; background: white;
+  border: 1px solid var(--accent); border-radius: 4px; font-size: 11px; color: var(--text);
+}
+.filter-tag .remove-filter { cursor: pointer; color: var(--red); font-weight: 700; padding: 0 2px; }
 </style>
 </head>
 <body>
@@ -432,6 +516,7 @@ function saveToStorage() {
       projectName: state.projectName, markup: state.markup,
       rates: state.rates, doors: state.doors, nextId: state.nextId,
       hiddenCols: [...state.hiddenCols],
+      customer: state.customer,
     };
     localStorage.setItem(STORAGE_KEYS.currentProject, JSON.stringify(proj));
     localStorage.setItem(STORAGE_KEYS.savedJobs, JSON.stringify(state.savedJobs.map(j => { const copy = {...j}; delete copy._fbId; return copy; })));
@@ -473,6 +558,7 @@ function saveJobToFirebase(job, existingId) {
   // Stringify large nested objects to avoid Firestore limits
   data.rates = JSON.stringify(data.rates || {});
   data.doors = JSON.stringify(data.doors || []);
+  if (data.customer && typeof data.customer === 'object') data.customer = JSON.stringify(data.customer);
   if (existingId) {
     // Update existing document
     return db.collection('jobs').doc(existingId).set(data).then(() => existingId);
@@ -523,6 +609,7 @@ function loadFromStorage() {
       state.doors = proj.doors || [];
       state.nextId = proj.nextId || state.doors.length + 1;
       state.hiddenCols = new Set(proj.hiddenCols || []);
+      if (proj.customer) state.customer = proj.customer;
     }
     // Restore saved jobs from localStorage (Firebase will overwrite if connected)
     const jobsRaw = localStorage.getItem(STORAGE_KEYS.savedJobs);
@@ -548,6 +635,18 @@ let state = {
   colSize: localStorage.getItem('matrix_col_size') || 'comfortable',
   searchTerm: '',
   currentJobId: null, // Firebase doc ID of the currently loaded job (null = unsaved/new)
+  colFilters: {},       // { colKey: Set(['val1','val2',...]) } — active filter selections
+  openFilter: null,     // which column filter dropdown is open
+  filterSearch: '',     // text typed in the filter search box
+  colOrder: JSON.parse(localStorage.getItem('matrix_col_order') || 'null'), // custom column key order or null for default
+  showColReorder: false,
+  // Customer details
+  customer: { name:'', site:'', contact:'', phone:'', email:'', poNumber:'', notes:'' },
+  showCustomerDetails: false,
+  // Client address book
+  clients: JSON.parse(localStorage.getItem('matrix_clients') || '[]'),
+  // Find & replace
+  showFindReplace: false,
 };
 
 // Load local data first, then connect Firebase
@@ -564,7 +663,7 @@ function createDoor() {
     pushPull: 'None', lockcase: 'None', escutcheon: 'None', flushBolt: 'None',
     kickPlate: 'None', combiLock: 'None', fingerGuard: 'None', signage: 'None',
     threshold: 'None', dropseal: 'None', cylinder: 'None', doorStop: 'None',
-    addedUplift: 0, comments: '',
+    addedUplift: 0, sellOverride: null, manualDesc: '', manualCost: 0, complete: false, comments: '',
   };
 }
 
@@ -582,6 +681,7 @@ function getDoorFormCode(door) {
 }
 
 function calcDoorCost(door) {
+  if (door.doorType === 'MANUAL') return parseFloat(door.manualCost) || 0;
   const baseFR = getBaseFireRating(door.fireRating);
   const rate = state.rates.doors.find(d => d.desc === door.doorType && d.fire === baseFR);
   if (!rate) return 0;
@@ -652,12 +752,51 @@ function calcHardwareCost(door) {
   return total;
 }
 
+function hwBreakdown(door) {
+  const hw = state.rates.hardware;
+  const lookup = (cat, val) => { const item = hw[cat]?.find(i => i.type === val); return item ? item.cost : 0; };
+  const lines = [];
+  const items = [
+    ['Hinge', 'hinges', door.hinge], ['Closer', 'closers', door.closer],
+    ['Intumescent', 'intumescents', door.intumescent], ['Lockcase', 'lockcases', door.lockcase],
+    ['Lever', 'levers', door.lever], ['Push/Pull', 'pushPull', door.pushPull],
+    ['Combi Lock', 'combiLocks', door.combiLock], ['Escutcheon', 'escutcheons', door.escutcheon],
+    ['Flush Bolt', 'flushBolts', door.flushBolt], ['Kick Plate', 'kickPlates', door.kickPlate],
+    ['Finger Guard', 'fingerGuards', door.fingerGuard], ['Signage', 'signage', door.signage],
+    ['Threshold', 'thresholds', door.threshold], ['Dropseal', 'dropseals', door.dropseal],
+    ['Cylinder', 'cylinders', door.cylinder], ['Door Stop', 'doorStops', door.doorStop],
+  ];
+  // Add custom categories
+  const _builtIn = new Set(['hinges','closers','intumescents','lockcases','levers','pushPull','combiLocks','escutcheons','flushBolts','kickPlates','fingerGuards','signage','thresholds','dropseals','cylinders','doorStops']);
+  for (const cat of HW_CATEGORIES) {
+    if (!_builtIn.has(cat.key) && door[cat.key]) {
+      items.push([cat.label, cat.key, door[cat.key]]);
+    }
+  }
+  let total = 0;
+  for (const [label, cat, val] of items) {
+    if (!val || val === 'None') continue;
+    const cost = lookup(cat, val);
+    if (cost > 0) { lines.push(`${label}: ${val} = £${cost.toFixed(2)}`); total += cost; }
+    else { lines.push(`${label}: ${val}`); }
+  }
+  if (lines.length === 0) return 'No hardware selected';
+  lines.push(`─────────────\\nTotal: £${total.toFixed(2)}`);
+  return lines.join('\\n');
+}
+
 function calcTotalCost(door) {
   return calcDoorCost(door) + calcFrameCost(door) + calcArchCost(door) + calcVPCost(door) + calcOverPanelCost(door) + calcHardwareCost(door) + (parseFloat(door.addedUplift) || 0);
 }
 
 function calcSellPrice(door) {
+  if (door.sellOverride !== null && door.sellOverride !== undefined && door.sellOverride !== '') {
+    return parseFloat(door.sellOverride) || 0;
+  }
   return Math.round(calcTotalCost(door) * (1 + state.markup) * 100) / 100;
+}
+function hasManualSell(door) {
+  return door.sellOverride !== null && door.sellOverride !== undefined && door.sellOverride !== '';
 }
 
 // ════════════════════════════════════════════
@@ -716,10 +855,12 @@ function sel(idx, field, options, currentVal, extraClass) {
   return html;
 }
 
-// Build hardware select options
-function hwOptions(cat, currentVal) {
+// Build hardware select options — with + Add New
+function hwOptions(cat) {
   const items = state.rates.hardware[cat] || [];
-  return items.map(i => ({ value: i.type, label: i.type }));
+  const opts = items.map(i => ({ value: i.type, label: i.type }));
+  opts.push({ value: '__ADD_NEW__' + cat, label: '+ Add New...' });
+  return opts;
 }
 
 // ════════════════════════════════════════════
@@ -852,8 +993,9 @@ function render() {
     }
     // Re-sync row heights after layout is complete
     syncRowHeights();
-    // Re-apply search filter if active
-    if (state.searchTerm) searchDoors(state.searchTerm);
+    // Re-apply search + column filters if active
+    const hasFilters = state.searchTerm || Object.values(state.colFilters).some(s => s && s.size > 0);
+    if (hasFilters) applyColumnFilters();
   });
 }
 
@@ -907,6 +1049,15 @@ function syncRowHeights() {
   }
 }
 
+// Close filter dropdown when clicking outside
+document.addEventListener('click', function(e) {
+  if (state.openFilter && !e.target.closest('.col-filter-wrap') && !e.target.closest('.col-filter-dropdown')) {
+    state.openFilter = null;
+    state.filterSearch = '';
+    render();
+  }
+});
+
 // ════════════════════════════════════════════
 // TAB NAVIGATION — move between cells like a spreadsheet
 // ════════════════════════════════════════════
@@ -955,7 +1106,7 @@ document.addEventListener('keydown', function(e) {
 // ════════════════════════════════════════════
 function renderSchedule() {
   const doorTypes = [...new Set(state.rates.doors.map(d => d.desc))];
-  const doorTypeOpts = [{value:'', label:'\u2014 Select \u2014'}, ...doorTypes.map(t => ({value:t, label:t}))];
+  const doorTypeOpts = [{value:'', label:'\u2014 Select \u2014'}, ...doorTypes.map(t => ({value:t, label:t})), {value:'MANUAL', label:'MANUAL (custom)'}];
   const archTypes = state.rates.architraves.map(a => a.type);
   const totalCost = state.doors.reduce((s, d) => s + calcTotalCost(d), 0);
   const totalSell = state.doors.reduce((s, d) => s + calcSellPrice(d), 0);
@@ -964,7 +1115,14 @@ function renderSchedule() {
   // Column definitions for the left table
   const colDefs = [
     { key:'doorId',      thClass:'', thLabel:'DOOR ID', thStyle:'', cell: (d,idx) => `<input value="${esc(d.doorId)}" oninput="updText(${idx},'doorId',this)" onblur="updTextBlur(${idx},'doorId',this)" placeholder="e.g. ROOM 14" style="min-width:150px;text-align:left">` },
-    { key:'doorType',    thClass:'', thLabel:'DOOR TYPE', thStyle:'min-width:220px', cell: (d,idx) => sel(idx, 'doorType', doorTypeOpts, d.doorType) },
+    { key:'doorType',    thClass:'', thLabel:'DOOR TYPE', thStyle:'min-width:220px', cell: (d,idx) => {
+      let html = sel(idx, 'doorType', doorTypeOpts, d.doorType);
+      if (d.doorType === 'MANUAL') {
+        html += `<input value="${esc(d.manualDesc)}" oninput="updText(${idx},'manualDesc',this)" onblur="updTextBlur(${idx},'manualDesc',this)" placeholder="Description..." style="margin-top:3px;font-size:12px;width:100%">`;
+        html += `<input type="number" value="${d.manualCost||0}" onblur="state.doors[${idx}].manualCost=parseFloat(this.value)||0;render()" placeholder="Cost £" step="0.01" style="margin-top:2px;font-size:12px;width:100px">`;
+      }
+      return html;
+    }},
     { key:'width',       thClass:'', thLabel:'WIDTH', thStyle:'', cell: (d,idx) => `<input type="number" value="${d.width}" oninput="updText(${idx},'width',this)" onblur="updTextBlur(${idx},'width',this)" placeholder="mm">` },
     { key:'height',      thClass:'', thLabel:'HEIGHT', thStyle:'', cell: (d,idx) => `<input type="number" value="${d.height}" oninput="updText(${idx},'height',this)" onblur="updTextBlur(${idx},'height',this)" placeholder="mm">` },
     { key:'handing',     thClass:'', thLabel:'HAND', thStyle:'', cell: (d,idx) => sel(idx, 'handing', HANDING, d.handing) },
@@ -1003,25 +1161,41 @@ function renderSchedule() {
   }
   colDefs.push({ key:'comments', thClass:'', thLabel:'NOTES', thStyle:'', cell: (d,idx) => `<input value="${esc(d.comments)}" oninput="updText(${idx},'comments',this)" onblur="updTextBlur(${idx},'comments',this)" style="min-width:140px;text-align:left" placeholder="Notes...">` });
 
-  const visCols = colDefs.filter(c => vis(c.key));
+  // Apply custom column order if set
+  let orderedDefs = colDefs;
+  if (state.colOrder && state.colOrder.length > 0) {
+    const ordered = [];
+    const remaining = [...colDefs];
+    for (const key of state.colOrder) {
+      const idx = remaining.findIndex(c => c.key === key);
+      if (idx >= 0) ordered.push(remaining.splice(idx, 1)[0]);
+    }
+    orderedDefs = [...ordered, ...remaining];
+  }
+
+  const visCols = orderedDefs.filter(c => vis(c.key));
 
   let leftRows = '';
   let rightRows = '';
 
   state.doors.forEach((d, idx) => {
-    const warnings = getWarnings(d);
-    const rowClass = warnings.length ? 'has-warning' : '';
+    const warnings = d.complete ? [] : getWarnings(d);
+    const rowClass = d.complete ? 'row-complete' : (warnings.length ? 'has-warning' : '');
     const dc = calcDoorCost(d), fc = calcFrameCost(d), ac = calcArchCost(d), vc = calcVPCost(d), oc = calcOverPanelCost(d), hc = calcHardwareCost(d);
     const doorVP = dc + vc;
     const sell = calcSellPrice(d);
     const warnTip = warnings.length ? ` title="${esc(warnings.join('\n'))}"` : '';
     // Build cost breakdown tooltip
     const costTip = `Door: ${fmt(dc)} (${d.doorType||'?'}, ${d.fireRating}, ${d.doorFinish})\\nVP: ${fmt(vc)} (${d.vp} panels)`;
+    const hwTip = hwBreakdown(d);
 
     leftRows += `<tr class="${rowClass}">
-      <td style="width:36px"><span class="delete-row" onclick="deleteDoor(${idx})" title="Delete row">&times;</span><span class="copy-row" onclick="copyDoor(${idx})" title="Copy row">&#x2398;</span></td>
-      ${warnings.length ? `<td style="width:36px"${warnTip}><span class="warn-icon">&#9888;</span></td>` : '<td style="width:36px"></td>'}
-      ${visCols.map(c => `<td>${c.cell(d, idx)}</td>`).join('')}
+      <td style="width:36px" class="frozen-col frozen-col-0"><span class="delete-row" onclick="deleteDoor(${idx})" title="Delete row">&times;</span><span class="copy-row" onclick="copyDoor(${idx})" title="Copy row">&#x2398;</span><span class="complete-btn${d.complete ? ' is-complete' : ''}" onclick="toggleComplete(${idx})" title="${d.complete ? 'Mark incomplete' : 'Mark complete'}">${d.complete ? '&#10004;' : '&#9675;'}</span></td>
+      ${warnings.length ? `<td style="width:36px" class="frozen-col frozen-col-1"${warnTip}><span class="warn-icon">&#9888;</span></td>` : `<td style="width:36px" class="frozen-col frozen-col-1">${d.complete ? '<span style="color:var(--green);font-size:14px">&#10004;</span>' : ''}</td>`}
+      ${visCols.map((c, ci) => {
+        const isFrozenDoorId = (ci === 0 && c.key === 'doorId');
+        return `<td${isFrozenDoorId ? ' class="frozen-col frozen-col-2"' : ''}>${c.cell(d, idx)}</td>`;
+      }).join('')}
     </tr>`;
 
     rightRows += `<tr class="${rowClass}">
@@ -1029,9 +1203,12 @@ function renderSchedule() {
       <td>${fmt(fc)}</td>
       <td>${fmt(ac)}</td>
       <td>${fmt(oc)}</td>
-      <td>${fmt(hc)}</td>
+      <td title="${hwTip}" style="cursor:help">${fmt(hc)}</td>
       <td><input type="number" value="${d.addedUplift||0}" oninput="updText(${idx},'addedUplift',this)" onblur="state.doors[${idx}].addedUplift=parseFloat(this.value)||0;render()" step="0.01"></td>
-      <td class="sell-cell">${fmt(sell)}</td>
+      <td class="sell-cell${hasManualSell(d) ? ' sell-override' : ''}" title="${hasManualSell(d) ? 'Manual override (auto: '+fmt(Math.round(calcTotalCost(d)*(1+state.markup)*100)/100)+') — click x to clear' : 'Click to override sell price'}">
+        <input type="number" value="${hasManualSell(d) ? d.sellOverride : sell}" oninput="state.doors[${idx}].sellOverride=this.value===''?null:this.value" onblur="if(this.value!==''){state.doors[${idx}].sellOverride=parseFloat(this.value)||0}else{state.doors[${idx}].sellOverride=null};render()" step="0.01" style="width:90px;font-weight:700;color:${hasManualSell(d)?'var(--accent)':'var(--green)'};text-align:center;border:1px solid ${hasManualSell(d)?'var(--accent)':'transparent'};background:${hasManualSell(d)?'var(--accent-light)':'transparent'};border-radius:4px;padding:5px 4px;font-size:13px" placeholder="${fmt(sell)}">
+        ${hasManualSell(d) ? `<span onclick="state.doors[${idx}].sellOverride=null;render()" style="cursor:pointer;color:var(--red);font-size:11px;position:absolute;right:2px;top:1px" title="Clear override">&times;</span>` : ''}
+      </td>
     </tr>`;
   });
 
@@ -1053,18 +1230,71 @@ function renderSchedule() {
         <button class="btn btn-outline" onclick="addMultipleDoors()">+ Add 10</button>
         <button class="btn btn-outline" onclick="document.getElementById('xlsImportInput').click()" title="Import doors from an Excel file">&#128229; Import Excel</button>
         <input type="file" id="xlsImportInput" accept=".xlsx,.xls,.csv" style="display:none" onchange="importFromExcel(event)">
-        <button class="btn btn-outline" onclick="state.showColPicker=!state.showColPicker;render()" style="position:relative">
+        <button class="btn btn-outline" onclick="state.showColPicker=!state.showColPicker;state.showColReorder=false;render()" style="position:relative">
           Columns${state.hiddenCols.size ? ` (${state.hiddenCols.size} hidden)` : ''}
+        </button>
+        <button class="btn btn-outline" onclick="state.showColReorder=!state.showColReorder;state.showColPicker=false;render()" title="Reorder columns by dragging">
+          &#8693; Reorder
         </button>
         <button class="btn btn-outline" onclick="cycleColSize()" title="Change column width">
           ${state.colSize === 'compact' ? '&#9642; Compact' : state.colSize === 'comfortable' ? '&#9644; Comfortable' : '&#9646; Spacious'}
         </button>
+        <span style="border-left:1px solid var(--border);height:24px;margin:0 4px"></span>
+        <button class="btn btn-outline" onclick="state.showCustomerDetails=!state.showCustomerDetails;render()" style="${state.customer.name ? 'border-color:var(--green);color:var(--green)' : ''}">
+          &#128100; ${state.customer.name || 'Client Details'}
+        </button>
+        <button class="btn btn-outline" onclick="toggleFindReplace()">
+          &#128260; Find &amp; Replace
+        </button>
       </div>
     </div>
+    ${state.showCustomerDetails ? `
+    <div class="customer-panel">
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px">
+        <span style="font-size:13px;font-weight:600;color:var(--primary)">&#128100; Client / Project Details</span>
+        <div style="display:flex;gap:6px;align-items:center">
+          ${state.clients.length > 0 ? `<select onchange="if(this.value!=='')loadClient(parseInt(this.value));this.value=''" style="padding:5px 8px;border:1px solid var(--border);border-radius:4px;font-size:12px">
+            <option value="">Load from address book...</option>
+            ${state.clients.map((c, i) => `<option value="${i}">${esc(c.name)}${c.site ? ' — ' + esc(c.site) : ''}</option>`).join('')}
+          </select>` : ''}
+          <button class="btn btn-sm btn-outline" onclick="saveClient()" title="Save to address book">&#128190; Save Client</button>
+          ${state.clients.length > 0 ? `<button class="btn btn-sm btn-outline" onclick="state.modal={type:'manageClients'};render()" title="Manage saved clients">&#128209; Manage</button>` : ''}
+        </div>
+      </div>
+      <div class="customer-grid">
+        <div class="customer-field"><label>Client Name</label><input value="${esc(state.customer.name)}" oninput="state.customer.name=this.value" placeholder="Company or client name"></div>
+        <div class="customer-field"><label>Site / Project Address</label><input value="${esc(state.customer.site)}" oninput="state.customer.site=this.value" placeholder="Site address"></div>
+        <div class="customer-field"><label>Contact Person</label><input value="${esc(state.customer.contact)}" oninput="state.customer.contact=this.value" placeholder="Name"></div>
+        <div class="customer-field"><label>Phone</label><input value="${esc(state.customer.phone)}" oninput="state.customer.phone=this.value" placeholder="Phone number"></div>
+        <div class="customer-field"><label>Email</label><input value="${esc(state.customer.email)}" oninput="state.customer.email=this.value" placeholder="Email address"></div>
+        <div class="customer-field"><label>PO Number</label><input value="${esc(state.customer.poNumber)}" oninput="state.customer.poNumber=this.value" placeholder="Purchase order ref"></div>
+        <div class="customer-field" style="grid-column:span 2"><label>Notes</label><input value="${esc(state.customer.notes)}" oninput="state.customer.notes=this.value" placeholder="Any additional notes..."></div>
+      </div>
+    </div>` : ''}
+    ${state.showFindReplace ? `
+    <div class="find-replace-panel">
+      <div class="fr-field">
+        <label>Column</label>
+        <select id="frColumn" onchange="updateFROptions()">
+          <option value="">— Select Column —</option>
+          ${getFRColumnOptions().map(c => `<option value="${c.key}">${esc(c.label)}</option>`).join('')}
+        </select>
+      </div>
+      <div class="fr-field">
+        <label>Find</label>
+        <select id="frFind"><option value="">Select column first</option></select>
+      </div>
+      <div class="fr-field">
+        <label>Replace with</label>
+        <select id="frReplace"><option value="">Select column first</option></select>
+      </div>
+      <button class="btn btn-primary" onclick="doFindReplace()" style="margin-bottom:1px">Replace All</button>
+      <button class="btn btn-outline" onclick="toggleFindReplace()">Close</button>
+    </div>` : ''}
     ${state.showColPicker ? `
     <div style="padding:12px 28px;background:#F8F9FB;border-bottom:1px solid var(--border);display:flex;flex-wrap:wrap;gap:6px;align-items:center">
       <span style="font-size:12px;font-weight:600;color:var(--text-muted);margin-right:8px">Show/Hide Columns:</span>
-      ${SCHEDULE_COLS.map(c => {
+      ${getOrderedCols().map(c => {
         const hidden = state.hiddenCols.has(c.key);
         const groupColor = c.group === 'spec' ? 'var(--green)' : c.group === 'hw' ? 'var(--accent)' : 'var(--primary)';
         return `<label style="display:inline-flex;align-items:center;gap:4px;padding:4px 10px;border-radius:4px;font-size:12px;cursor:pointer;border:1px solid ${hidden ? 'var(--border)' : groupColor};background:${hidden ? '#f0f0f0' : 'white'};opacity:${hidden ? '0.5' : '1'}">
@@ -1074,13 +1304,53 @@ function renderSchedule() {
       }).join('')}
       <button class="btn btn-sm btn-outline" onclick="state.hiddenCols.clear();render()" style="margin-left:8px">Show All</button>
     </div>` : ''}
+    ${state.showColReorder ? `
+    <div style="padding:12px 28px;background:#F0F4FF;border-bottom:1px solid var(--border)">
+      <div style="display:flex;align-items:center;gap:8px;margin-bottom:8px">
+        <span style="font-size:12px;font-weight:600;color:var(--text-muted)">Drag to reorder columns:</span>
+        <button class="btn btn-sm btn-outline" onclick="saveColOrder([]);render()" style="font-size:11px">Reset to Default</button>
+      </div>
+      <div class="col-reorder-list">
+        ${getOrderedCols().map(c => {
+          const groupColor = c.group === 'spec' ? 'var(--green)' : c.group === 'hw' ? 'var(--accent)' : c.group === 'other' ? 'var(--text-muted)' : 'var(--primary)';
+          return `<div class="col-reorder-item" draggable="true" data-col-key="${c.key}"
+            ondragstart="colDragStart('${c.key}',event)" ondragend="colDragEnd(event)"
+            ondragover="colDragOver(event)" ondragleave="colDragLeave(event)"
+            ondrop="colDrop('${c.key}',event)"
+            style="border-color:${groupColor}">
+            <span class="drag-handle">&#9776;</span> ${esc(c.label)}
+          </div>`;
+        }).join('')}
+      </div>
+    </div>` : ''}
+    ${(() => {
+      const activeFilterKeys = Object.entries(state.colFilters).filter(([k,v]) => v && v.size > 0);
+      if (activeFilterKeys.length === 0) return '';
+      return `<div class="active-filters-bar">
+        <span style="font-weight:600;color:var(--accent)">&#9881; Filters:</span>
+        ${activeFilterKeys.map(([key, vals]) => {
+          const col = orderedDefs.find(c => c.key === key) || { thLabel: key };
+          const label = col.thLabel || key;
+          const valStr = vals.size <= 3 ? [...vals].join(', ') : [...vals].slice(0,2).join(', ') + ' +' + (vals.size-2);
+          return `<span class="filter-tag">${label}: ${esc(valStr)} <span class="remove-filter" onclick="clearFilter('${key}')">&times;</span></span>`;
+        }).join('')}
+        <button class="btn btn-sm btn-outline" onclick="clearAllFilters()" style="font-size:11px;margin-left:4px">Clear All</button>
+      </div>`;
+    })()}
     <div class="schedule-outer size-${state.colSize}">
       <!-- LEFT: Scrollable data columns -->
       <div class="schedule-scroll" id="scheduleLeft">
         <table>
           <thead><tr>
-            <th style="width:36px"></th><th style="width:36px"></th>
-            ${visCols.map(c => `<th${c.thClass ? ' class="'+c.thClass+'"' : ''}${c.thStyle ? ' style="'+c.thStyle+'"' : ''}>${c.thLabel}</th>`).join('')}
+            <th style="width:36px" class="frozen-col frozen-col-0"></th><th style="width:36px" class="frozen-col frozen-col-1"></th>
+            ${visCols.map((c, ci) => {
+              const isFrozenDoorId = (ci === 0 && c.key === 'doorId');
+              const cls = [c.thClass || '', isFrozenDoorId ? 'frozen-col frozen-col-2' : ''].filter(Boolean).join(' ');
+              const hasFilter = state.colFilters[c.key] && state.colFilters[c.key].size > 0;
+              const isOpen = state.openFilter === c.key;
+              const filterBtn = `<span class="col-filter-wrap"><button class="col-filter-btn${hasFilter ? ' has-filter' : ''}${isOpen ? ' active' : ''}" onclick="toggleFilter('${c.key}',event)" title="Filter ${c.thLabel}">&#9660;</button>${isOpen ? renderFilterDropdown(c.key) : ''}</span>`;
+              return `<th${cls ? ' class="'+cls+'"' : ''}${c.thStyle ? ' style="'+c.thStyle+'"' : ''}>${c.thLabel} ${filterBtn}</th>`;
+            }).join('')}
           </tr></thead>
           <tbody>${leftRows}</tbody>
         </table>
@@ -1114,30 +1384,7 @@ let _searchTimer = null;
 function searchDoors(val) {
   state.searchTerm = val;
   clearTimeout(_searchTimer);
-  _searchTimer = setTimeout(() => {
-    // Instead of full re-render, just toggle row visibility for speed
-    const leftTbody = document.querySelector('#scheduleLeft tbody');
-    const rightTbody = document.querySelector('#scheduleRight tbody');
-    if (!leftTbody || !rightTbody) { render(); return; }
-    const searchLow = val.toLowerCase();
-    let visCount = 0;
-    state.doors.forEach((d, i) => {
-      let show = true;
-      if (searchLow) {
-        const fields = [d.doorId, d.doorType, d.comments, d.fireRating, d.doorFinish, d.frameFinish,
-          d.handing, d.archFinish, d.overPanel, d.hinge, d.intumescent, d.closer, d.lever, d.pushPull,
-          d.lockcase, d.escutcheon, d.flushBolt, d.kickPlate, d.combiLock, d.fingerGuard, d.signage,
-          d.threshold, d.dropseal, d.cylinder, d.doorStop];
-        show = fields.some(f => f && String(f).toLowerCase().includes(searchLow));
-      }
-      if (leftTbody.rows[i]) leftTbody.rows[i].style.display = show ? '' : 'none';
-      if (rightTbody.rows[i]) rightTbody.rows[i].style.display = show ? '' : 'none';
-      if (show) visCount++;
-    });
-    // Update door count in summary
-    const countEl = document.querySelector('.summary-item .value');
-    if (countEl) countEl.textContent = searchLow ? visCount + ' / ' + state.doors.length : state.doors.length;
-  }, 150);
+  _searchTimer = setTimeout(() => applyColumnFilters(), 150);
 }
 
 function cycleColSize() {
@@ -1146,6 +1393,341 @@ function cycleColSize() {
   state.colSize = sizes[(idx + 1) % sizes.length];
   localStorage.setItem('matrix_col_size', state.colSize);
   render();
+}
+
+// ════════════════════════════════════════════
+// COLUMN FILTERS (Excel-style)
+// ════════════════════════════════════════════
+function getUniqueVals(colKey) {
+  const vals = new Set();
+  state.doors.forEach(d => {
+    const v = d[colKey];
+    vals.add(v === undefined || v === null || v === '' ? '(Blank)' : String(v));
+  });
+  return [...vals].sort((a, b) => {
+    if (a === '(Blank)') return 1;
+    if (b === '(Blank)') return -1;
+    return a.localeCompare(b, undefined, { numeric: true });
+  });
+}
+
+function toggleFilter(colKey, e) {
+  if (e) e.stopPropagation();
+  if (state.openFilter === colKey) { state.openFilter = null; state.filterSearch = ''; }
+  else { state.openFilter = colKey; state.filterSearch = ''; }
+  render();
+  // Focus the filter search input after render
+  setTimeout(() => {
+    const inp = document.getElementById('filterSearchInput');
+    if (inp) inp.focus();
+  }, 50);
+}
+
+function applyColumnFilters() {
+  // DOM-based: hide/show rows based on all active filters + search
+  const leftTbody = document.querySelector('#scheduleLeft tbody');
+  const rightTbody = document.querySelector('#scheduleRight tbody');
+  if (!leftTbody || !rightTbody) return;
+  const searchLow = (state.searchTerm || '').toLowerCase();
+  let visCount = 0;
+  state.doors.forEach((d, i) => {
+    let show = true;
+    // Check column filters
+    for (const [key, allowed] of Object.entries(state.colFilters)) {
+      if (!allowed || allowed.size === 0) continue;
+      const val = d[key];
+      const strVal = (val === undefined || val === null || val === '') ? '(Blank)' : String(val);
+      if (!allowed.has(strVal)) { show = false; break; }
+    }
+    // Check search
+    if (show && searchLow) {
+      const fields = [d.doorId, d.doorType, d.comments, d.fireRating, d.doorFinish, d.frameFinish,
+        d.handing, d.archFinish, d.overPanel, d.hinge, d.intumescent, d.closer, d.lever, d.pushPull,
+        d.lockcase, d.escutcheon, d.flushBolt, d.kickPlate, d.combiLock, d.fingerGuard, d.signage,
+        d.threshold, d.dropseal, d.cylinder, d.doorStop];
+      show = fields.some(f => f && String(f).toLowerCase().includes(searchLow));
+    }
+    if (leftTbody.rows[i]) leftTbody.rows[i].style.display = show ? '' : 'none';
+    if (rightTbody.rows[i]) rightTbody.rows[i].style.display = show ? '' : 'none';
+    if (show) visCount++;
+  });
+  const countEl = document.querySelector('.summary-item .value');
+  if (countEl) {
+    const hasFilter = searchLow || Object.values(state.colFilters).some(s => s && s.size > 0);
+    countEl.textContent = hasFilter ? visCount + ' / ' + state.doors.length : state.doors.length;
+  }
+}
+
+function setFilter(colKey, values) {
+  // values is array of strings to allow
+  if (!values || values.length === 0) { delete state.colFilters[colKey]; }
+  else { state.colFilters[colKey] = new Set(values); }
+  state.openFilter = null;
+  state.filterSearch = '';
+  render();
+  setTimeout(() => applyColumnFilters(), 30);
+}
+
+function clearFilter(colKey) {
+  delete state.colFilters[colKey];
+  render();
+  setTimeout(() => applyColumnFilters(), 30);
+}
+
+function clearAllFilters() {
+  state.colFilters = {};
+  render();
+  setTimeout(() => applyColumnFilters(), 30);
+}
+
+function renderFilterDropdown(colKey) {
+  const allVals = getUniqueVals(colKey);
+  const current = state.colFilters[colKey]; // Set or undefined
+  const searchLow = (state.filterSearch || '').toLowerCase();
+  const filtered = searchLow ? allVals.filter(v => v.toLowerCase().includes(searchLow)) : allVals;
+
+  return `<div class="col-filter-dropdown" onclick="event.stopPropagation()">
+    <div class="filter-search"><input id="filterSearchInput" type="text" value="${esc(state.filterSearch)}" oninput="state.filterSearch=this.value;render();setTimeout(()=>{const i=document.getElementById('filterSearchInput');if(i){i.focus();i.setSelectionRange(i.value.length,i.value.length)}},30)" placeholder="Search values..."></div>
+    <div class="filter-list">
+      ${filtered.map(v => {
+        const checked = !current || current.has(v);
+        return `<label><input type="checkbox" ${checked?'checked':''} data-filter-val="${esc(v)}" onchange="void(0)" style="margin:0"> ${esc(v)}</label>`;
+      }).join('')}
+      ${filtered.length === 0 ? '<div style="padding:8px 10px;color:var(--text-muted)">No values match</div>' : ''}
+    </div>
+    <div class="filter-actions">
+      <button onclick="clearFilter('${colKey}')">Clear</button>
+      <button onclick="const checks=document.querySelectorAll('.col-filter-dropdown input[data-filter-val]');const vals=[];checks.forEach(c=>{if(c.checked)vals.push(c.dataset.filterVal)});setFilter('${colKey}',vals)" class="apply-btn">Apply</button>
+    </div>
+  </div>`;
+}
+
+// ════════════════════════════════════════════
+// COLUMN REORDER (drag & drop)
+// ════════════════════════════════════════════
+let _dragColKey = null;
+
+function getOrderedCols() {
+  // Return SCHEDULE_COLS + custom categories in the user's custom order (if set)
+  const allCols = [...SCHEDULE_COLS];
+  // Add custom hw categories
+  const builtInKeys = SCHEDULE_COLS.map(c => c.key);
+  for (const cat of HW_CATEGORIES) {
+    if (!builtInKeys.includes(cat.key)) {
+      allCols.push({ key: cat.key, label: cat.label, group: 'hw' });
+    }
+  }
+  if (!state.colOrder || state.colOrder.length === 0) return allCols;
+  // Reorder by stored order, putting any new columns at the end
+  const ordered = [];
+  const remaining = [...allCols];
+  for (const key of state.colOrder) {
+    const idx = remaining.findIndex(c => c.key === key);
+    if (idx >= 0) { ordered.push(remaining.splice(idx, 1)[0]); }
+  }
+  return [...ordered, ...remaining];
+}
+
+function saveColOrder(keys) {
+  state.colOrder = keys;
+  localStorage.setItem('matrix_col_order', JSON.stringify(keys));
+}
+
+function colDragStart(key, e) {
+  _dragColKey = key;
+  e.dataTransfer.effectAllowed = 'move';
+  e.target.classList.add('dragging');
+}
+function colDragEnd(e) {
+  _dragColKey = null;
+  document.querySelectorAll('.col-reorder-item').forEach(el => {
+    el.classList.remove('dragging', 'drag-over');
+  });
+}
+function colDragOver(e) {
+  e.preventDefault();
+  e.dataTransfer.dropEffect = 'move';
+  e.target.closest('.col-reorder-item')?.classList.add('drag-over');
+}
+function colDragLeave(e) {
+  e.target.closest('.col-reorder-item')?.classList.remove('drag-over');
+}
+function colDrop(targetKey, e) {
+  e.preventDefault();
+  if (!_dragColKey || _dragColKey === targetKey) return;
+  const cols = getOrderedCols();
+  const keys = cols.map(c => c.key);
+  const fromIdx = keys.indexOf(_dragColKey);
+  const toIdx = keys.indexOf(targetKey);
+  if (fromIdx < 0 || toIdx < 0) return;
+  keys.splice(fromIdx, 1);
+  keys.splice(toIdx, 0, _dragColKey);
+  saveColOrder(keys);
+  _dragColKey = null;
+  render();
+}
+
+// ════════════════════════════════════════════
+// MARK DOOR COMPLETE
+// ════════════════════════════════════════════
+function toggleComplete(idx) {
+  state.doors[idx].complete = !state.doors[idx].complete;
+  render();
+}
+
+// ════════════════════════════════════════════
+// ADD NEW PRODUCT FROM DROPDOWN
+// ════════════════════════════════════════════
+let _addProductState = null; // { cat, doorIdx, doorField }
+
+function showAddProductModal(cat, doorIdx, doorField) {
+  _addProductState = { cat, doorIdx, doorField };
+  // Find friendly category name
+  const catObj = HW_CATEGORIES.find(c => c.key === cat);
+  const catLabel = catObj ? catObj.label : cat;
+  state.modal = {
+    title: `Add New ${catLabel}`,
+    cat: cat,
+    catLabel: catLabel,
+  };
+  render();
+  setTimeout(() => { const inp = document.getElementById('newProductName'); if (inp) inp.focus(); }, 50);
+}
+
+function confirmAddProduct() {
+  const nameEl = document.getElementById('newProductName');
+  const costEl = document.getElementById('newProductCost');
+  if (!nameEl || !nameEl.value.trim()) { showToast('Enter a product name'); return; }
+  const name = nameEl.value.trim();
+  const cost = parseFloat(costEl?.value) || 0;
+  const { cat, doorIdx, doorField } = _addProductState;
+  // Add to rates
+  if (!state.rates.hardware[cat]) state.rates.hardware[cat] = [];
+  // Check for duplicate
+  if (state.rates.hardware[cat].find(i => i.type === name)) { showToast('Product already exists'); return; }
+  state.rates.hardware[cat].push({ type: name, cost: cost });
+  // Set on the door
+  state.doors[doorIdx][doorField] = name;
+  // Save rates
+  saveRatesToFirebase();
+  saveToStorage();
+  state.modal = null;
+  _addProductState = null;
+  render();
+  showToast(`Added "${name}" to ${cat}`);
+}
+
+function cancelAddProduct() {
+  // Revert the dropdown
+  if (_addProductState) {
+    const { doorIdx, doorField } = _addProductState;
+    state.doors[doorIdx][doorField] = 'None';
+  }
+  state.modal = null;
+  _addProductState = null;
+  render();
+}
+
+// ════════════════════════════════════════════
+// FIND & REPLACE
+// ════════════════════════════════════════════
+function toggleFindReplace() {
+  state.showFindReplace = !state.showFindReplace;
+  state.showColPicker = false;
+  state.showColReorder = false;
+  render();
+}
+
+function doFindReplace() {
+  const colSel = document.getElementById('frColumn');
+  const findSel = document.getElementById('frFind');
+  const repSel = document.getElementById('frReplace');
+  if (!colSel || !findSel || !repSel) return;
+  const col = colSel.value;
+  const findVal = findSel.value;
+  const repVal = repSel.value;
+  if (!col || !findVal || findVal === repVal) { showToast('Select different find and replace values'); return; }
+  let count = 0;
+  state.doors.forEach(d => {
+    if (d[col] === findVal) { d[col] = repVal; count++; }
+  });
+  if (count > 0) {
+    render();
+    showToast(`Replaced "${findVal}" with "${repVal}" on ${count} door${count>1?'s':''}`);
+  } else {
+    showToast('No matches found');
+  }
+}
+
+function getFRColumnOptions() {
+  // Return columns that have selectable values (hardware + specs)
+  return [
+    { key:'hinge', label:'Hinge', cat:'hinges' }, { key:'closer', label:'Closer', cat:'closers' },
+    { key:'intumescent', label:'Intumescent', cat:'intumescents' }, { key:'lockcase', label:'Lockcase', cat:'lockcases' },
+    { key:'lever', label:'Lever', cat:'levers' }, { key:'pushPull', label:'Push/Pull', cat:'pushPull' },
+    { key:'combiLock', label:'Combi Lock', cat:'combiLocks' }, { key:'escutcheon', label:'Escutcheon', cat:'escutcheons' },
+    { key:'flushBolt', label:'Flush Bolt', cat:'flushBolts' }, { key:'kickPlate', label:'Kick Plate', cat:'kickPlates' },
+    { key:'fingerGuard', label:'Finger Guard', cat:'fingerGuards' }, { key:'signage', label:'Signage', cat:'signage' },
+    { key:'threshold', label:'Threshold', cat:'thresholds' }, { key:'dropseal', label:'Dropseal', cat:'dropseals' },
+    { key:'cylinder', label:'Cylinder', cat:'cylinders' }, { key:'doorStop', label:'Door Stop', cat:'doorStops' },
+    { key:'fireRating', label:'Fire Rating', cat:null }, { key:'doorFinish', label:'Door Finish', cat:null },
+    { key:'frameFinish', label:'Frame Finish', cat:null }, { key:'handing', label:'Handing', cat:null },
+    { key:'doorType', label:'Door Type', cat:null },
+  ];
+}
+
+function updateFROptions() {
+  const colSel = document.getElementById('frColumn');
+  const findSel = document.getElementById('frFind');
+  const repSel = document.getElementById('frReplace');
+  if (!colSel) return;
+  const col = colSel.value;
+  if (!col) { findSel.innerHTML = '<option value="">Select column first</option>'; repSel.innerHTML = findSel.innerHTML; return; }
+  // Get unique values currently in use for "find"
+  const inUse = [...new Set(state.doors.map(d => d[col]).filter(v => v && v !== 'None' && v !== ''))].sort();
+  findSel.innerHTML = '<option value="">— Select —</option>' + inUse.map(v => `<option value="${esc(v)}">${esc(v)}</option>`).join('');
+  // Get all available values for "replace"
+  const frCol = getFRColumnOptions().find(c => c.key === col);
+  let allVals = [];
+  if (frCol && frCol.cat) {
+    allVals = (state.rates.hardware[frCol.cat] || []).map(i => i.type);
+  } else if (col === 'fireRating') allVals = FIRE_RATINGS;
+  else if (col === 'doorFinish') allVals = FINISHES;
+  else if (col === 'frameFinish') allVals = FRAME_FINISHES;
+  else if (col === 'handing') allVals = HANDING;
+  else if (col === 'doorType') allVals = [...new Set(state.rates.doors.map(d => d.desc))];
+  else allVals = inUse;
+  repSel.innerHTML = '<option value="">— Select —</option>' + allVals.map(v => `<option value="${esc(v)}">${esc(v)}</option>`).join('');
+}
+
+// ════════════════════════════════════════════
+// CLIENT ADDRESS BOOK
+// ════════════════════════════════════════════
+function saveClient() {
+  const c = { ...state.customer, savedDate: new Date().toISOString() };
+  if (!c.name.trim()) { showToast('Enter a client name first'); return; }
+  // Check for existing client with same name — update it
+  const existing = state.clients.findIndex(cl => cl.name.toLowerCase() === c.name.toLowerCase());
+  if (existing >= 0) { state.clients[existing] = c; }
+  else { state.clients.push(c); }
+  localStorage.setItem('matrix_clients', JSON.stringify(state.clients));
+  showToast('Client saved: ' + c.name);
+}
+
+function loadClient(idx) {
+  const c = state.clients[idx];
+  if (!c) return;
+  state.customer = { ...c };
+  render();
+  showToast('Loaded: ' + c.name);
+}
+
+function deleteClient(idx) {
+  const name = state.clients[idx]?.name || '';
+  state.clients.splice(idx, 1);
+  localStorage.setItem('matrix_clients', JSON.stringify(state.clients));
+  render();
+  showToast('Deleted: ' + name);
 }
 
 function addDoor() { state.doors.push(createDoor()); render(); }
@@ -1162,11 +1744,17 @@ function copyDoor(idx) {
 }
 
 // Text-only fields that don't affect costs — update silently without full re-render
-const _textOnlyFields = new Set(['doorId','comments','width','height']);
+const _textOnlyFields = new Set(['doorId','comments','width','height','manualDesc']);
 
 function upd(idx, key, val) {
   // VP is numeric — keep it as a number so the dropdown matches correctly
   if (key === 'vp') val = parseInt(val) || 0;
+  // Intercept "+ Add New" from hardware dropdowns
+  if (typeof val === 'string' && val.startsWith('__ADD_NEW__')) {
+    const cat = val.replace('__ADD_NEW__', '');
+    showAddProductModal(cat, idx, key);
+    return;
+  }
   state.doors[idx][key] = val;
   if (_textOnlyFields.has(key)) {
     // Don't re-render for simple text — just save the value
@@ -1567,6 +2155,46 @@ function renderExport() {
 // Modal
 function renderModal() {
   const m = state.modal;
+  // Add New Product modal
+  if (m.cat) {
+    return `<div class="add-product-modal" onclick="if(event.target===this)cancelAddProduct()">
+      <div class="add-product-form">
+        <h3>Add New ${esc(m.catLabel)}</h3>
+        <label>Product Name</label>
+        <input id="newProductName" placeholder="e.g. Dorma TS83" autofocus>
+        <label>Cost Price (£)</label>
+        <input id="newProductCost" type="number" step="0.01" placeholder="0.00" value="0">
+        <div class="form-actions">
+          <button class="btn btn-outline" onclick="cancelAddProduct()">Cancel</button>
+          <button class="btn btn-primary" onclick="confirmAddProduct()">Add Product</button>
+        </div>
+      </div>
+    </div>`;
+  }
+  // Manage Clients modal
+  if (m.type === 'manageClients') {
+    return `<div class="modal-overlay" onclick="if(event.target===this){state.modal=null;render()}">
+      <div class="modal" style="width:520px;max-height:80vh;overflow-y:auto">
+        <h3>&#128209; Saved Clients</h3>
+        ${state.clients.length === 0 ? '<p style="color:var(--text-muted)">No saved clients yet.</p>' : `
+        <table style="width:100%;font-size:13px;border-collapse:collapse">
+          <thead><tr><th style="text-align:left;padding:8px;border-bottom:2px solid var(--border)">Name</th><th style="text-align:left;padding:8px;border-bottom:2px solid var(--border)">Site</th><th style="padding:8px;border-bottom:2px solid var(--border)"></th></tr></thead>
+          <tbody>${state.clients.map((c, i) => `<tr>
+            <td style="padding:6px 8px;border-bottom:1px solid var(--border)">${esc(c.name)}</td>
+            <td style="padding:6px 8px;border-bottom:1px solid var(--border)">${esc(c.site||'')}</td>
+            <td style="padding:6px 8px;border-bottom:1px solid var(--border);text-align:right">
+              <button class="btn btn-sm btn-primary" onclick="loadClient(${i});state.modal=null;render()" style="font-size:11px">Load</button>
+              <button class="btn btn-sm btn-outline" onclick="deleteClient(${i})" style="font-size:11px;color:var(--red)">Delete</button>
+            </td>
+          </tr>`).join('')}</tbody>
+        </table>`}
+        <div class="modal-actions">
+          <button class="btn btn-outline" onclick="state.modal=null;render()">Close</button>
+        </div>
+      </div>
+    </div>`;
+  }
+  // Default modal
   return `<div class="modal-overlay" onclick="if(event.target===this){state.modal=null;render()}">
     <div class="modal">
       <h3>${m.title}</h3>
@@ -1586,18 +2214,58 @@ function exportPDF() {
   if (state.doors.length === 0) { showToast('Add some doors first!'); return; }
   const { jsPDF } = window.jspdf;
   const doc = new jsPDF({ orientation: 'landscape', unit: 'mm', format: 'a3' });
+  const pw = doc.internal.pageSize.getWidth();
+  const ph = doc.internal.pageSize.getHeight();
+  const c = state.customer;
+  const today = new Date().toLocaleDateString('en-GB');
+  const quoteRef = 'MH-' + Date.now().toString(36).toUpperCase();
 
-  doc.setFontSize(16);
+  // ── COVER / HEADER ──
+  // Blue header bar
+  doc.setFillColor(47, 84, 150);
+  doc.rect(0, 0, pw, 28, 'F');
+  doc.setTextColor(255, 255, 255);
+  doc.setFontSize(22);
   doc.setFont('helvetica', 'bold');
-  doc.text('MATRIX HARDWARE \u2014 DOOR SCHEDULE', 14, 15);
+  doc.text('MATRIX HARDWARE', 14, 13);
   doc.setFontSize(10);
   doc.setFont('helvetica', 'normal');
-  doc.text(`Project: ${state.projectName}    |    Date: ${new Date().toLocaleDateString('en-GB')}    |    Doors: ${state.doors.length}`, 14, 22);
+  doc.text('Architectural Ironmongery Specialists', 14, 20);
+  doc.setFontSize(9);
+  doc.text(`Quote Ref: ${quoteRef}    |    Date: ${today}`, pw - 14, 13, { align: 'right' });
+  doc.text(`Prepared by: ${c.contact || 'Matrix Hardware'}`, pw - 14, 20, { align: 'right' });
 
-  // Build columns dynamically based on visible columns
+  // Reset text colour
+  doc.setTextColor(0, 0, 0);
+
+  // Project & Client details
+  let y = 36;
+  doc.setFontSize(14);
+  doc.setFont('helvetica', 'bold');
+  doc.text(`Project: ${state.projectName}`, 14, y);
+  y += 7;
+  doc.setFontSize(9);
+  doc.setFont('helvetica', 'normal');
+  if (c.name) { doc.text(`Client: ${c.name}`, 14, y); y += 5; }
+  if (c.site) { doc.text(`Site: ${c.site}`, 14, y); y += 5; }
+  if (c.poNumber) { doc.text(`PO Number: ${c.poNumber}`, 14, y); y += 5; }
+  if (c.phone || c.email) { doc.text(`Contact: ${[c.phone, c.email].filter(Boolean).join(' | ')}`, 14, y); y += 5; }
+
+  // Summary line
+  const totalSell = state.doors.reduce((s, d) => s + calcSellPrice(d), 0);
+  const totalCost = state.doors.reduce((s, d) => s + calcTotalCost(d), 0);
+  y += 3;
+  doc.setFillColor(214, 228, 240);
+  doc.rect(14, y - 4, pw - 28, 8, 'F');
+  doc.setFont('helvetica', 'bold');
+  doc.setFontSize(10);
+  doc.text(`${state.doors.length} Doors    |    Total (ex VAT): ${fmt(totalSell)}    |    Markup: ${(state.markup*100).toFixed(0)}%`, 18, y + 1);
+  y += 12;
+
+  // ── SCHEDULE TABLE ──
   const fieldMap = {
     doorId: { label:'Door ID', val: d => d.doorId },
-    doorType: { label:'Type', val: d => (d.doorType||'').replace('SINGLE ACTION ','') },
+    doorType: { label:'Type', val: d => d.doorType === 'MANUAL' ? (d.manualDesc || 'MANUAL') : (d.doorType||'').replace('SINGLE ACTION ','') },
     width: { label:'W', val: d => d.width },
     height: { label:'H', val: d => d.height },
     handing: { label:'Hand', val: d => d.handing },
@@ -1625,32 +2293,28 @@ function exportPDF() {
     doorStop: { label:'D/Stop', val: d => d.doorStop },
     comments: { label:'Notes', val: d => d.comments },
   };
-  // Add custom categories to the map
   for (const cat of HW_CATEGORIES) {
     if (!fieldMap[cat.key]) {
       fieldMap[cat.key] = { label: cat.label, val: d => d[cat.key] || '' };
     }
   }
 
-  // Get visible columns from SCHEDULE_COLS
   const visCols = SCHEDULE_COLS.filter(c => !state.hiddenCols.has(c.key) && fieldMap[c.key]);
   const headers = [...visCols.map(c => fieldMap[c.key].label), 'Sell Price'];
   const body = state.doors.map(d => [
     ...visCols.map(c => fieldMap[c.key].val(d) || ''),
     fmt(calcSellPrice(d))
   ]);
-  const totalSell = state.doors.reduce((s, d) => s + calcSellPrice(d), 0);
   const totalRow = visCols.map(() => '');
   totalRow[totalRow.length - 1] = 'TOTAL:';
   totalRow.push(fmt(totalSell));
   body.push(totalRow);
 
-  // Auto-size font based on column count
   const colCount = headers.length;
   const fontSize = colCount > 25 ? 5.5 : colCount > 20 ? 6 : colCount > 15 ? 6.5 : 7;
 
   doc.autoTable({
-    head: [headers], body: body, startY: 28, theme: 'grid',
+    head: [headers], body: body, startY: y, theme: 'grid',
     styles: { fontSize: fontSize, cellPadding: 1.5, overflow: 'linebreak' },
     headStyles: { fillColor: [47, 84, 150], fontSize: fontSize, fontStyle: 'bold' },
     alternateRowStyles: { fillColor: [240, 244, 255] },
@@ -1663,6 +2327,38 @@ function exportPDF() {
       }
     }
   });
+
+  // ── FOOTER: T&Cs ──
+  const finalY = doc.lastAutoTable.finalY + 10;
+  const addFooter = (startY) => {
+    let fy = startY;
+    if (fy > ph - 40) { doc.addPage(); fy = 15; }
+    doc.setFontSize(8);
+    doc.setFont('helvetica', 'bold');
+    doc.setTextColor(47, 84, 150);
+    doc.text('Terms & Conditions', 14, fy);
+    doc.setFont('helvetica', 'normal');
+    doc.setTextColor(100, 100, 100);
+    fy += 5;
+    const terms = [
+      '1. Prices are valid for 30 days from the date of this quotation unless otherwise stated.',
+      '2. All prices are exclusive of VAT unless stated otherwise.',
+      '3. Payment terms: 30 days from date of invoice unless otherwise agreed.',
+      '4. Delivery lead times are subject to stock availability at time of order.',
+      '5. All goods remain the property of Matrix Hardware until paid for in full.',
+      '6. This quotation is based on the information provided. Any variations may result in price adjustments.',
+      '7. Installation is not included unless specifically stated.',
+    ];
+    terms.forEach(t => { doc.text(t, 14, fy); fy += 4; });
+    fy += 4;
+    doc.setTextColor(47, 84, 150);
+    doc.setFont('helvetica', 'bold');
+    doc.text('Matrix Hardware  |  Architectural Ironmongery Specialists', 14, fy);
+    doc.setFont('helvetica', 'normal');
+    doc.setTextColor(100, 100, 100);
+    doc.text('www.matrixhardware.co.uk  |  sales@matrixhardware.co.uk', 14, fy + 4);
+  };
+  addFooter(finalY);
 
   doc.save(`${state.projectName.replace(/\s+/g,'_')}_Quote.pdf`);
   showToast('PDF exported!');
@@ -2031,6 +2727,7 @@ function buildJobData() {
     savedDate: new Date().toISOString(),
     savedDateDisplay: new Date().toLocaleString('en-GB'),
     customCategories: HW_CATEGORIES.filter(c => !BUILTIN_HW_KEYS.includes(c.key)),
+    customer: JSON.parse(JSON.stringify(state.customer)),
   };
 }
 
@@ -2107,6 +2804,9 @@ function loadSavedJob(idx) {
     }
   }
   state.currentJobId = job._fbId || null;
+  // Restore customer details
+  const cust = typeof job.customer === 'string' ? JSON.parse(job.customer) : job.customer;
+  state.customer = cust || { name:'', site:'', contact:'', phone:'', email:'', poNumber:'', notes:'' };
   state.page = 'schedule';
   render();
   showToast('Opened: ' + state.projectName);
