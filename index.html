@@ -540,6 +540,7 @@ let state = {
   showColPicker: false,
   savedJobs: [],
   colSize: localStorage.getItem('matrix_col_size') || 'comfortable',
+  searchTerm: '',
 };
 
 // Load local data first, then connect Firebase
@@ -832,6 +833,8 @@ function render() {
         }
       }
     }
+    // Re-sync row heights after layout is complete
+    syncRowHeights();
   });
 }
 
@@ -849,6 +852,40 @@ function syncScroll() {
   if (!left || !right) return;
   left.addEventListener('scroll', function() { right.scrollTop = left.scrollTop; });
   right.addEventListener('scroll', function() { left.scrollTop = right.scrollTop; });
+  // Match row heights between left and right tables so they stay aligned
+  syncRowHeights();
+}
+
+function syncRowHeights() {
+  const leftTbody = document.querySelector('#scheduleLeft tbody');
+  const rightTbody = document.querySelector('#scheduleRight tbody');
+  if (!leftTbody || !rightTbody) return;
+  const leftRows = leftTbody.rows;
+  const rightRows = rightTbody.rows;
+  const len = Math.min(leftRows.length, rightRows.length);
+  for (let i = 0; i < len; i++) {
+    // Reset heights first
+    leftRows[i].style.height = '';
+    rightRows[i].style.height = '';
+    // Get natural heights then set both to the max
+    const lh = leftRows[i].getBoundingClientRect().height;
+    const rh = rightRows[i].getBoundingClientRect().height;
+    const maxH = Math.max(lh, rh);
+    leftRows[i].style.height = maxH + 'px';
+    rightRows[i].style.height = maxH + 'px';
+  }
+  // Also sync header heights
+  const leftTh = document.querySelector('#scheduleLeft thead tr');
+  const rightTh = document.querySelector('#scheduleRight thead tr');
+  if (leftTh && rightTh) {
+    leftTh.style.height = '';
+    rightTh.style.height = '';
+    const lhh = leftTh.getBoundingClientRect().height;
+    const rhh = rightTh.getBoundingClientRect().height;
+    const maxHh = Math.max(lhh, rhh);
+    leftTh.style.height = maxHh + 'px';
+    rightTh.style.height = maxHh + 'px';
+  }
 }
 
 // ════════════════════════════════════════════
@@ -952,7 +989,21 @@ function renderSchedule() {
   let leftRows = '';
   let rightRows = '';
 
+  // Search filter — match against all door fields
+  const searchLower = state.searchTerm ? state.searchTerm.toLowerCase() : '';
+  function doorMatchesSearch(d) {
+    if (!searchLower) return true;
+    const searchFields = [d.doorId, d.doorType, d.comments, d.fireRating, d.doorFinish, d.frameFinish,
+      d.handing, d.archFinish, d.overPanel, d.hinge, d.intumescent, d.closer, d.lever, d.pushPull,
+      d.lockcase, d.escutcheon, d.flushBolt, d.kickPlate, d.combiLock, d.fingerGuard, d.signage,
+      d.threshold, d.dropseal, d.cylinder, d.doorStop];
+    return searchFields.some(f => f && String(f).toLowerCase().includes(searchLower));
+  }
+
+  let visibleCount = 0;
   state.doors.forEach((d, idx) => {
+    if (!doorMatchesSearch(d)) return;
+    visibleCount++;
     const warnings = getWarnings(d);
     const rowClass = warnings.length ? 'has-warning' : '';
     const dc = calcDoorCost(d), fc = calcFrameCost(d), ac = calcArchCost(d), vc = calcVPCost(d), oc = calcOverPanelCost(d), hc = calcHardwareCost(d);
@@ -983,6 +1034,9 @@ function renderSchedule() {
     <div class="header">
       <h1>Door Schedule &mdash; <span contenteditable="true" onblur="state.projectName=this.textContent" style="border-bottom:1px dashed var(--border);outline:none;padding:0 4px">${esc(state.projectName)}</span></h1>
       <div class="header-actions">
+        <input type="text" value="${esc(state.searchTerm)}" oninput="searchDoors(this.value)" placeholder="&#128269; Search doors..." style="width:180px;padding:8px 12px;border:1px solid var(--border);border-radius:5px;font-size:13px" id="searchInput">
+        ${state.searchTerm ? `<button class="btn btn-sm btn-outline" onclick="state.searchTerm='';render();setTimeout(()=>{const s=document.getElementById('searchInput');if(s)s.focus()},50)" style="padding:6px 10px" title="Clear search">&times;</button>` : ''}
+        <span style="border-left:1px solid var(--border);height:24px;margin:0 4px"></span>
         <span style="font-size:13px;color:var(--text-muted)">Markup:</span>
         <input type="number" value="${(state.markup*100).toFixed(0)}" onchange="state.markup=parseFloat(this.value)/100;render()" style="width:60px;padding:8px;border:1px solid var(--border);border-radius:5px;font-size:13px;text-align:center" min="0" max="100">
         <span style="font-size:13px;color:var(--text-muted)">%</span>
@@ -1034,7 +1088,7 @@ function renderSchedule() {
       </div>
     </div>
     <div class="summary-bar">
-      <div class="summary-item"><span class="label">Doors:</span><span class="value">${state.doors.length}</span></div>
+      <div class="summary-item"><span class="label">Doors:</span><span class="value">${searchLower ? visibleCount + ' / ' + state.doors.length : state.doors.length}</span></div>
       <div class="summary-item"><span class="label">Total Cost:</span><span class="value">${fmt(totalCost)}</span></div>
       <div class="summary-item"><span class="label">Total Sell (${(state.markup*100).toFixed(0)}% markup):</span><span class="value" style="color:var(--green);font-size:16px">${fmt(totalSell)}</span></div>
     </div>
@@ -1045,6 +1099,20 @@ function toggleCol(key) {
   if (state.hiddenCols.has(key)) state.hiddenCols.delete(key);
   else state.hiddenCols.add(key);
   render();
+}
+
+let _searchTimer = null;
+function searchDoors(val) {
+  state.searchTerm = val;
+  clearTimeout(_searchTimer);
+  _searchTimer = setTimeout(() => {
+    render();
+    // Re-focus search input after render
+    setTimeout(() => {
+      const s = document.getElementById('searchInput');
+      if (s) { s.focus(); s.setSelectionRange(s.value.length, s.value.length); }
+    }, 20);
+  }, 250);
 }
 
 function cycleColSize() {
