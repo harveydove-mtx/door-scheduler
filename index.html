@@ -169,6 +169,8 @@ body { font-family: 'Segoe UI', system-ui, -apple-system, sans-serif; background
 /* Delete row btn */
 .delete-row { color: var(--red); cursor: pointer; font-size: 16px; opacity: 0.4; padding: 4px; }
 .delete-row:hover { opacity: 1; }
+.copy-row { color: var(--primary); cursor: pointer; font-size: 14px; opacity: 0.4; padding: 4px; display: block; }
+.copy-row:hover { opacity: 1; }
 
 /* Warning icon */
 .warn-icon { color: var(--red); font-size: 18px; cursor: help; }
@@ -295,7 +297,10 @@ let HW_CATEGORIES = [
 const FIRE_RATINGS = ['NFR','FD30','FD30S','FD60','FD60S'];
 const HANDING = ['LH','RH','N/A'];
 const FINISHES = ['PRIMED','LAMINATE','VENEER','SPRAY'];
-const FRAME_FINISHES = ['PRIMED','HARDWOOD/OAK','HARDWOOD SPRAY','SPRAY'];
+let FRAME_FINISHES = ['PRIMED','HARDWOOD/OAK','HARDWOOD SPRAY','SPRAY'];
+// Map frame finish display names to object keys used in frame rate data
+const FRAME_FINISH_KEY_MAP = { 'PRIMED':'primed', 'HARDWOOD/OAK':'hardwood', 'HARDWOOD SPRAY':'hardwoodSpray', 'SPRAY':'spray' };
+function frameFinishKey(name) { return FRAME_FINISH_KEY_MAP[name] || name.toLowerCase().replace(/[^a-z0-9]+(.)/g, (m, c) => c.toUpperCase()).replace(/[^a-zA-Z0-9]/g, ''); }
 const OVER_PANEL_TYPES = ['NONE','SOLID','GLAZED'];
 
 // ════════════════════════════════════════════
@@ -381,6 +386,16 @@ function initFirebase() {
               }
             }
           }
+          // Restore custom frame finishes from Firebase
+          if (data.customFrameFinishes) {
+            const cff = JSON.parse(data.customFrameFinishes);
+            for (const ff of cff) {
+              if (!FRAME_FINISHES.includes(ff)) {
+                FRAME_FINISHES.push(ff);
+                FRAME_FINISH_KEY_MAP[ff] = frameFinishKey(ff);
+              }
+            }
+          }
           render();
         }
       }
@@ -405,6 +420,7 @@ const STORAGE_KEYS = {
   currentProject: 'matrix_current_project',
   savedJobs: 'matrix_saved_jobs',
   customCategories: 'matrix_custom_categories',
+  customFrameFinishes: 'matrix_custom_frame_finishes',
 };
 
 const BUILTIN_HW_KEYS = ['hinges','closers','intumescents','lockcases','levers','pushPull','combiLocks','escutcheons','flushBolts','kickPlates','fingerGuards','signage','thresholds','dropseals','cylinders','doorStops'];
@@ -421,6 +437,10 @@ function saveToStorage() {
     localStorage.setItem(STORAGE_KEYS.savedJobs, JSON.stringify(state.savedJobs.map(j => { const copy = {...j}; delete copy._fbId; return copy; })));
     const customCats = HW_CATEGORIES.filter(c => !BUILTIN_HW_KEYS.includes(c.key));
     localStorage.setItem(STORAGE_KEYS.customCategories, JSON.stringify(customCats));
+    // Save custom frame finishes (beyond the 4 defaults)
+    const defaultFrameFinishes = ['PRIMED','HARDWOOD/OAK','HARDWOOD SPRAY','SPRAY'];
+    const customFrameFinishes = FRAME_FINISHES.filter(f => !defaultFrameFinishes.includes(f));
+    localStorage.setItem(STORAGE_KEYS.customFrameFinishes, JSON.stringify(customFrameFinishes));
   } catch(e) {}
 }
 
@@ -432,9 +452,12 @@ function saveRatesToFirebase() {
   _ratesSaveTimer = setTimeout(() => {
     _skipFireSync = true;
     const customCats = HW_CATEGORIES.filter(c => !BUILTIN_HW_KEYS.includes(c.key));
+    const defaultFF = ['PRIMED','HARDWOOD/OAK','HARDWOOD SPRAY','SPRAY'];
+    const customFF = FRAME_FINISHES.filter(f => !defaultFF.includes(f));
     db.collection('config').doc('rates').set({
       rates: JSON.stringify(state.rates),
       customCategories: JSON.stringify(customCats),
+      customFrameFinishes: JSON.stringify(customFF),
       updatedAt: new Date().toISOString(),
       updatedBy: 'team',
     }).then(() => { _skipFireSync = false; })
@@ -470,6 +493,17 @@ function loadFromStorage() {
           HW_CATEGORIES.push(cc);
           if (!SCHEDULE_COLS.find(sc => sc.key === cc.key))
             SCHEDULE_COLS.push({ key: cc.key, label: cc.label, group: 'hw' });
+        }
+      }
+    }
+    // Restore custom frame finishes
+    const ffRaw = localStorage.getItem(STORAGE_KEYS.customFrameFinishes);
+    if (ffRaw) {
+      const customFF = JSON.parse(ffRaw);
+      for (const ff of customFF) {
+        if (!FRAME_FINISHES.includes(ff)) {
+          FRAME_FINISHES.push(ff);
+          FRAME_FINISH_KEY_MAP[ff] = frameFinishKey(ff);
         }
       }
     }
@@ -552,8 +586,8 @@ function calcFrameCost(door) {
   const fc = getDoorFormCode(door);
   const fr = state.rates.frames.find(f => f.formCode === fc);
   if (!fr) return 0;
-  const map = { PRIMED: 'primed', 'HARDWOOD/OAK': 'hardwood', 'HARDWOOD SPRAY': 'hardwoodSpray', SPRAY: 'spray' };
-  return fr[map[door.frameFinish]] || 0;
+  const key = frameFinishKey(door.frameFinish);
+  return fr[key] || 0;
 }
 
 function calcArchCost(door) {
@@ -925,7 +959,7 @@ function renderSchedule() {
     const warnTip = warnings.length ? ` title="${esc(warnings.join('\n'))}"` : '';
 
     leftRows += `<tr class="${rowClass}">
-      <td style="width:36px"><span class="delete-row" onclick="deleteDoor(${idx})" title="Delete row">&times;</span></td>
+      <td style="width:36px"><span class="delete-row" onclick="deleteDoor(${idx})" title="Delete row">&times;</span><span class="copy-row" onclick="copyDoor(${idx})" title="Copy row">&#x2398;</span></td>
       ${warnings.length ? `<td style="width:36px"${warnTip}><span class="warn-icon">&#9888;</span></td>` : '<td style="width:36px"></td>'}
       ${visCols.map(c => `<td>${c.cell(d, idx)}</td>`).join('')}
     </tr>`;
@@ -1020,6 +1054,15 @@ function cycleColSize() {
 function addDoor() { state.doors.push(createDoor()); render(); }
 function addMultipleDoors() { for(let i=0;i<10;i++) state.doors.push(createDoor()); render(); }
 function deleteDoor(idx) { state.doors.splice(idx, 1); render(); }
+function copyDoor(idx) {
+  const src = state.doors[idx];
+  const copy = JSON.parse(JSON.stringify(src));
+  copy.id = state.nextId++;
+  copy.doorId = src.doorId ? src.doorId + ' (copy)' : '';
+  state.doors.splice(idx + 1, 0, copy);
+  render();
+  showToast('Row copied');
+}
 
 // Text-only fields that don't affect costs — update silently without full re-render
 const _textOnlyFields = new Set(['doorId','comments','width','height']);
@@ -1176,17 +1219,24 @@ function renderFrameRates() {
   return `
     <div class="rates-header">
       <h3>Frame Rates</h3>
-      <button class="btn btn-primary btn-sm" onclick="addFrameRate()">+ Add Frame Type</button>
+      <div style="display:flex;gap:8px">
+        <button class="btn btn-primary btn-sm" onclick="addFrameRate()">+ Add Frame Type</button>
+        <button class="btn btn-accent btn-sm" onclick="addFrameFinish()">+ Add Finish Column</button>
+      </div>
     </div>
-    <p style="padding:8px 18px 0;font-size:12px;color:var(--text-muted)">Each row is a frame type linked to a door form code. Prices are per finish type.</p>
+    <p style="padding:8px 18px 0;font-size:12px;color:var(--text-muted)">Each row is a frame type linked to a door form code. Add finish columns to create new frame finish options.</p>
     <table class="rate-table">
-      <thead><tr><th>Form Code</th><th>Primed (&pound;)</th><th>Hardwood/Oak (&pound;)</th><th>Hardwood Spray (&pound;)</th><th>Spray (&pound;)</th><th style="width:50px"></th></tr></thead>
+      <thead><tr>
+        <th>Form Code</th>
+        ${FRAME_FINISHES.map(ff => `<th>${esc(ff)} (&pound;)${!['PRIMED','HARDWOOD/OAK','HARDWOOD SPRAY','SPRAY'].includes(ff) ? ' <span class="delete-row" onclick="delFrameFinish(\''+esc(ff).replace(/'/g,"\\'")+'\')" title="Remove column" style="cursor:pointer;color:#fff;opacity:0.7;font-size:16px">&times;</span>' : ''}</th>`).join('')}
+        <th style="width:50px"></th>
+      </tr></thead>
       <tbody>${state.rates.frames.map((f,i) => `<tr>
         <td><input value="${esc(f.formCode)}" onchange="state.rates.frames[${i}].formCode=this.value;render()"></td>
-        <td><input type="number" step="0.01" value="${f.primed}" onchange="state.rates.frames[${i}].primed=parseFloat(this.value)||0;render()"></td>
-        <td><input type="number" step="0.01" value="${f.hardwood}" onchange="state.rates.frames[${i}].hardwood=parseFloat(this.value)||0;render()"></td>
-        <td><input type="number" step="0.01" value="${f.hardwoodSpray}" onchange="state.rates.frames[${i}].hardwoodSpray=parseFloat(this.value)||0;render()"></td>
-        <td><input type="number" step="0.01" value="${f.spray}" onchange="state.rates.frames[${i}].spray=parseFloat(this.value)||0;render()"></td>
+        ${FRAME_FINISHES.map(ff => {
+          const key = frameFinishKey(ff);
+          return `<td><input type="number" step="0.01" value="${f[key]||0}" onchange="state.rates.frames[${i}]['${key}']=parseFloat(this.value)||0;render()"></td>`;
+        }).join('')}
         <td><span class="delete-row" onclick="delFrameRate(${i})">&times;</span></td>
       </tr>`).join('')}</tbody>
     </table>
@@ -1194,7 +1244,9 @@ function renderFrameRates() {
 }
 
 function addFrameRate() {
-  state.rates.frames.push({ formCode:'NEW', primed:0, hardwood:0, hardwoodSpray:0, spray:0 });
+  const newFrame = { formCode:'NEW' };
+  for (const ff of FRAME_FINISHES) { newFrame[frameFinishKey(ff)] = 0; }
+  state.rates.frames.push(newFrame);
   render();
   showToast('New frame type added');
 }
@@ -1203,6 +1255,59 @@ function delFrameRate(idx) {
   if (state.rates.frames.length <= 1) { showToast('Cannot delete the last frame type'); return; }
   state.rates.frames.splice(idx, 1);
   render();
+}
+
+function addFrameFinish() {
+  state.modal = {
+    title: 'Add Frame Finish Column',
+    body: `
+      <div style="margin-bottom:14px">
+        <label style="font-size:13px;font-weight:600;display:block;margin-bottom:6px">Finish Name</label>
+        <input id="newFrameFinish" style="width:100%;padding:10px;border:1px solid var(--border);border-radius:6px;font-size:14px" placeholder="e.g. ALUMINIUM, STEEL, MDF">
+      </div>
+    `,
+    action: 'confirmAddFrameFinish()'
+  };
+  render();
+  setTimeout(() => { const el = document.getElementById('newFrameFinish'); if (el) el.focus(); }, 100);
+}
+
+function confirmAddFrameFinish() {
+  const el = document.getElementById('newFrameFinish');
+  const name = el ? el.value.trim().toUpperCase() : '';
+  if (!name) { showToast('Please enter a finish name'); return; }
+  if (FRAME_FINISHES.includes(name)) { showToast('That finish already exists'); return; }
+  FRAME_FINISHES.push(name);
+  const key = frameFinishKey(name);
+  FRAME_FINISH_KEY_MAP[name] = key;
+  // Add the new key to all existing frame rate rows with 0 value
+  for (const f of state.rates.frames) { f[key] = 0; }
+  state.modal = null;
+  render();
+  saveRatesToFirebase();
+  showToast('Frame finish "' + name + '" added!');
+}
+
+function delFrameFinish(name) {
+  state.modal = {
+    title: 'Delete Frame Finish?',
+    body: '<p>Are you sure you want to remove the <strong>' + esc(name) + '</strong> finish column? Any prices set for this finish will be lost.</p>',
+    action: "confirmDelFrameFinish('" + name.replace(/'/g, "\\'") + "')"
+  };
+  render();
+}
+
+function confirmDelFrameFinish(name) {
+  const key = frameFinishKey(name);
+  FRAME_FINISHES = FRAME_FINISHES.filter(f => f !== name);
+  delete FRAME_FINISH_KEY_MAP[name];
+  for (const f of state.rates.frames) { delete f[key]; }
+  // Reset any doors using this finish to PRIMED
+  state.doors.forEach(d => { if (d.frameFinish === name) d.frameFinish = 'PRIMED'; });
+  state.modal = null;
+  render();
+  saveRatesToFirebase();
+  showToast('Frame finish "' + name + '" removed');
 }
 
 function renderArchRates() {
