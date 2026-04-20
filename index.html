@@ -2259,7 +2259,7 @@ function exportPDF() {
   doc.rect(14, y - 4, pw - 28, 8, 'F');
   doc.setFont('helvetica', 'bold');
   doc.setFontSize(10);
-  doc.text(`${state.doors.length} Doors    |    Total (ex VAT): ${fmt(totalSell)}    |    Markup: ${(state.markup*100).toFixed(0)}%`, 18, y + 1);
+  doc.text(`${state.doors.length} Doors    |    Total (ex VAT): ${fmt(totalSell)}`, 18, y + 1);
   y += 12;
 
   // ── SCHEDULE TABLE ──
