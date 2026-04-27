@@ -184,15 +184,35 @@ body { font-family: 'Segoe UI', system-ui, -apple-system, sans-serif; background
 /* Warning icon */
 .warn-icon { color: var(--red); font-size: 18px; cursor: help; }
 
-/* Empty state */
+/* Empty state & recent projects */
 .empty-state { padding: 60px 40px; text-align: center; color: var(--text-muted); font-size: 15px; }
 .empty-state strong { color: var(--primary); }
+.recent-projects { padding: 40px; max-width: 900px; margin: 0 auto; }
+.recent-projects h2 { font-size: 18px; color: var(--text-muted); margin-bottom: 16px; font-weight: 500; }
+.recent-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); gap: 14px; margin-bottom: 24px; }
+.recent-card {
+  background: var(--card); border: 1px solid var(--border); border-radius: 8px; padding: 16px;
+  cursor: pointer; transition: all 0.15s; box-shadow: var(--shadow);
+}
+.recent-card:hover { border-color: var(--primary); box-shadow: 0 4px 12px rgba(47,84,150,0.15); transform: translateY(-2px); }
+.recent-card .rc-name { font-weight: 600; font-size: 14px; margin-bottom: 6px; color: var(--text); }
+.recent-card .rc-meta { font-size: 12px; color: var(--text-muted); line-height: 1.6; }
+.recent-card .rc-meta span { display: inline-block; margin-right: 10px; }
 
 /* Modal */
 .modal-overlay { position: fixed; inset: 0; background: rgba(0,0,0,0.4); display: flex; align-items: center; justify-content: center; z-index: 100; }
 .modal { background: white; border-radius: 10px; padding: 28px; width: 440px; box-shadow: 0 20px 60px rgba(0,0,0,0.2); }
 .modal h3 { margin-bottom: 18px; font-size: 18px; }
 .modal-actions { display: flex; gap: 10px; justify-content: flex-end; margin-top: 24px; }
+
+/* Row drag reorder */
+.schedule-scroll tbody tr { transition: background 0.1s; }
+.schedule-scroll tbody tr.row-dragging { opacity: 0.4; }
+.schedule-scroll tbody tr.row-drag-over td { border-top: 3px solid var(--primary) !important; }
+.cost-panel tbody tr.row-drag-over td { border-top: 3px solid var(--primary) !important; }
+.row-drag-handle { cursor: grab; opacity: 0.25; font-size: 12px; display: block; line-height: 1; }
+.row-drag-handle:hover { opacity: 0.7; }
+.row-drag-handle:active { cursor: grabbing; }
 
 /* Complete door row */
 .schedule-scroll tbody tr.row-complete td { background: #E2EFDA !important; }
@@ -517,6 +537,7 @@ function saveToStorage() {
       rates: state.rates, doors: state.doors, nextId: state.nextId,
       hiddenCols: [...state.hiddenCols],
       customer: state.customer,
+      currentJobId: state.currentJobId, // preserve so we update the same job on next save
     };
     localStorage.setItem(STORAGE_KEYS.currentProject, JSON.stringify(proj));
     localStorage.setItem(STORAGE_KEYS.savedJobs, JSON.stringify(state.savedJobs.map(j => { const copy = {...j}; delete copy._fbId; return copy; })));
@@ -610,6 +631,7 @@ function loadFromStorage() {
       state.nextId = proj.nextId || state.doors.length + 1;
       state.hiddenCols = new Set(proj.hiddenCols || []);
       if (proj.customer) state.customer = proj.customer;
+      if (proj.currentJobId) state.currentJobId = proj.currentJobId;
     }
     // Restore saved jobs from localStorage (Firebase will overwrite if connected)
     const jobsRaw = localStorage.getItem(STORAGE_KEYS.savedJobs);
@@ -652,6 +674,71 @@ let state = {
 // Load local data first, then connect Firebase
 loadFromStorage();
 const _firebaseOK = initFirebase();
+
+// ════════════════════════════════════════════
+// UNDO / REDO HISTORY
+// ════════════════════════════════════════════
+const MAX_HISTORY = 50;
+let _undoStack = [];
+let _redoStack = [];
+let _lastSnapshot = null;
+
+function takeSnapshot() {
+  return JSON.stringify({ doors: state.doors, projectName: state.projectName, customer: state.customer, markup: state.markup });
+}
+
+function pushUndo() {
+  const snap = takeSnapshot();
+  if (snap === _lastSnapshot) return; // no change
+  _undoStack.push(_lastSnapshot || snap);
+  if (_undoStack.length > MAX_HISTORY) _undoStack.shift();
+  _redoStack = []; // clear redo on new action
+  _lastSnapshot = snap;
+}
+
+function undo() {
+  if (_undoStack.length === 0) { showToast('Nothing to undo'); return; }
+  _redoStack.push(takeSnapshot());
+  const prev = _undoStack.pop();
+  const data = JSON.parse(prev);
+  state.doors = data.doors;
+  state.projectName = data.projectName;
+  state.customer = data.customer;
+  state.markup = data.markup;
+  _lastSnapshot = prev;
+  render();
+  showToast('Undo');
+}
+
+function redo() {
+  if (_redoStack.length === 0) { showToast('Nothing to redo'); return; }
+  _undoStack.push(takeSnapshot());
+  const next = _redoStack.pop();
+  const data = JSON.parse(next);
+  state.doors = data.doors;
+  state.projectName = data.projectName;
+  state.customer = data.customer;
+  state.markup = data.markup;
+  _lastSnapshot = next;
+  render();
+  showToast('Redo');
+}
+
+// Capture initial snapshot
+setTimeout(() => { _lastSnapshot = takeSnapshot(); }, 100);
+
+// ════════════════════════════════════════════
+// AUTOSAVE — every 5 minutes
+// ════════════════════════════════════════════
+let _autosaveTimer = null;
+function startAutosave() {
+  if (_autosaveTimer) clearInterval(_autosaveTimer);
+  _autosaveTimer = setInterval(() => {
+    if (state.doors.length === 0 && !state.currentJobId) return; // nothing to save
+    quickSave(true); // true = silent (no toast unless it fails)
+  }, 5 * 60 * 1000); // 5 minutes
+}
+startAutosave();
 
 function createDoor() {
   return {
@@ -867,6 +954,8 @@ function hwOptions(cat) {
 // RENDER
 // ════════════════════════════════════════════
 function render() {
+  // Capture undo snapshot before re-render
+  if (typeof pushUndo === 'function') pushUndo();
   // Save scroll positions before re-render
   const _left = document.getElementById('scheduleLeft');
   const _right = document.getElementById('scheduleRight');
@@ -1059,6 +1148,24 @@ document.addEventListener('click', function(e) {
 });
 
 // ════════════════════════════════════════════
+// KEYBOARD SHORTCUTS
+// ════════════════════════════════════════════
+document.addEventListener('keydown', function(e) {
+  // Ctrl+Z = Undo
+  if ((e.ctrlKey || e.metaKey) && e.key === 'z' && !e.shiftKey) {
+    e.preventDefault(); undo(); return;
+  }
+  // Ctrl+Y or Ctrl+Shift+Z = Redo
+  if ((e.ctrlKey || e.metaKey) && (e.key === 'y' || (e.key === 'z' && e.shiftKey))) {
+    e.preventDefault(); redo(); return;
+  }
+  // Ctrl+S = Save
+  if ((e.ctrlKey || e.metaKey) && e.key === 's') {
+    e.preventDefault(); quickSave(); return;
+  }
+});
+
+// ════════════════════════════════════════════
 // TAB NAVIGATION — move between cells like a spreadsheet
 // ════════════════════════════════════════════
 document.addEventListener('keydown', function(e) {
@@ -1189,8 +1296,8 @@ function renderSchedule() {
     const costTip = `Door: ${fmt(dc)} (${d.doorType||'?'}, ${d.fireRating}, ${d.doorFinish})\\nVP: ${fmt(vc)} (${d.vp} panels)`;
     const hwTip = hwBreakdown(d);
 
-    leftRows += `<tr class="${rowClass}">
-      <td style="width:36px" class="frozen-col frozen-col-0"><span class="delete-row" onclick="deleteDoor(${idx})" title="Delete row">&times;</span><span class="copy-row" onclick="copyDoor(${idx})" title="Copy row">&#x2398;</span><span class="complete-btn${d.complete ? ' is-complete' : ''}" onclick="toggleComplete(${idx})" title="${d.complete ? 'Mark incomplete' : 'Mark complete'}">${d.complete ? '&#10004;' : '&#9675;'}</span></td>
+    leftRows += `<tr class="${rowClass}" draggable="true" ondragstart="rowDragStart(${idx},event)" ondragend="rowDragEnd(event)" ondragover="rowDragOver(${idx},event)" ondrop="rowDrop(${idx},event)">
+      <td style="width:36px" class="frozen-col frozen-col-0"><span class="row-drag-handle" title="Drag to reorder">&#9776;</span><span class="delete-row" onclick="deleteDoor(${idx})" title="Delete row">&times;</span><span class="copy-row" onclick="copyDoor(${idx})" title="Copy row">&#x2398;</span><span class="complete-btn${d.complete ? ' is-complete' : ''}" onclick="toggleComplete(${idx})" title="${d.complete ? 'Mark incomplete' : 'Mark complete'}">${d.complete ? '&#10004;' : '&#9675;'}</span></td>
       ${warnings.length ? `<td style="width:36px" class="frozen-col frozen-col-1"${warnTip}><span class="warn-icon">&#9888;</span></td>` : `<td style="width:36px" class="frozen-col frozen-col-1">${d.complete ? '<span style="color:var(--green);font-size:14px">&#10004;</span>' : ''}</td>`}
       ${visCols.map((c, ci) => {
         const isFrozenDoorId = (ci === 0 && c.key === 'doorId');
@@ -1216,9 +1323,19 @@ function renderSchedule() {
     <div class="header">
       <h1>Door Schedule &mdash; <span contenteditable="true" onblur="state.projectName=this.textContent" style="border-bottom:1px dashed var(--border);outline:none;padding:0 4px">${esc(state.projectName)}</span></h1>
       <div class="header-actions">
-        <button class="btn btn-success" onclick="quickSave()" title="${state.currentJobId ? 'Update saved project' : 'Save as new project'}" style="font-weight:700">
-          ${state.currentJobId ? '&#128190; Save' : '&#128190; Save New'}
-        </button>
+        <div style="position:relative;display:inline-flex">
+          <button class="btn btn-success" onclick="quickSave()" style="font-weight:700;border-radius:5px 0 0 5px">
+            &#128190; ${state.currentJobId ? 'Save' : 'Save New'}
+          </button><button class="btn btn-success" onclick="this.nextElementSibling.style.display=this.nextElementSibling.style.display==='block'?'none':'block'" style="font-weight:700;border-radius:0 5px 5px 0;border-left:1px solid rgba(255,255,255,0.3);padding:8px 6px" title="Save options">&#9660;</button>
+          <div style="display:none;position:absolute;top:100%;right:0;margin-top:4px;background:white;border:1px solid var(--border);border-radius:6px;box-shadow:0 8px 24px rgba(0,0,0,0.15);z-index:50;min-width:180px;font-size:13px">
+            <div onclick="quickSave();this.parentElement.style.display='none'" style="padding:10px 14px;cursor:pointer;border-bottom:1px solid var(--border);display:flex;align-items:center;gap:8px" onmouseover="this.style.background='var(--primary-light)'" onmouseout="this.style.background=''">
+              &#128190; <span><strong>${state.currentJobId ? 'Save' : 'Save New'}</strong><br><span style="font-size:11px;color:var(--text-muted)">${state.currentJobId ? 'Update current project' : 'Create new project'}</span></span>
+            </div>
+            <div onclick="saveAsNew();this.parentElement.style.display='none'" style="padding:10px 14px;cursor:pointer;display:flex;align-items:center;gap:8px" onmouseover="this.style.background='var(--primary-light)'" onmouseout="this.style.background=''">
+              &#128196; <span><strong>Save As New</strong><br><span style="font-size:11px;color:var(--text-muted)">Create a copy as a new project</span></span>
+            </div>
+          </div>
+        </div>
         <span style="border-left:1px solid var(--border);height:24px;margin:0 4px"></span>
         <input type="text" value="${esc(state.searchTerm)}" oninput="searchDoors(this.value)" placeholder="&#128269; Search doors..." style="width:180px;padding:8px 12px;border:1px solid var(--border);border-radius:5px;font-size:13px" id="searchInput">
         ${state.searchTerm ? `<button class="btn btn-sm btn-outline" onclick="state.searchTerm='';render();setTimeout(()=>{const s=document.getElementById('searchInput');if(s)s.focus()},50)" style="padding:6px 10px" title="Clear search">&times;</button>` : ''}
@@ -1354,7 +1471,7 @@ function renderSchedule() {
           </tr></thead>
           <tbody>${leftRows}</tbody>
         </table>
-        ${state.doors.length === 0 ? '<div class="empty-state">No doors yet. Click <strong>+ Add Door</strong> to get started.</div>' : ''}
+        ${state.doors.length === 0 ? renderRecentProjects() : ''}
       </div>
       <!-- RIGHT: Frozen cost columns -->
       <div class="cost-panel scroll-sync" id="scheduleRight">
@@ -1372,6 +1489,36 @@ function renderSchedule() {
       <div class="summary-item"><span class="label">Total Sell (${(state.markup*100).toFixed(0)}% markup):</span><span class="value" style="color:var(--green);font-size:16px">${fmt(totalSell)}</span></div>
     </div>
   `;
+}
+
+function renderRecentProjects() {
+  const recent = state.savedJobs.slice(0, 5);
+  if (recent.length === 0) {
+    return '<div class="empty-state">No doors yet. Click <strong>+ Add Door</strong> to get started.</div>';
+  }
+  return `<div class="recent-projects">
+    <div style="text-align:center;margin-bottom:24px">
+      <div style="font-size:15px;color:var(--text-muted);margin-bottom:12px">No doors in current project. Start fresh or open a recent project:</div>
+      <button class="btn btn-primary" onclick="addDoor()" style="font-size:15px;padding:10px 24px">+ Add Door</button>
+      <button class="btn btn-outline" onclick="addMultipleDoors()" style="margin-left:8px">+ Add 10</button>
+    </div>
+    <h2>Recent Projects</h2>
+    <div class="recent-grid">
+      ${recent.map((job, i) => {
+        const doors = typeof job.doors === 'string' ? JSON.parse(job.doors) : (job.doors || []);
+        const doorCount = Array.isArray(doors) ? doors.length : 0;
+        const cust = typeof job.customer === 'string' ? JSON.parse(job.customer || '{}') : (job.customer || {});
+        return `<div class="recent-card" onclick="loadSavedJob(${i})">
+          <div class="rc-name">${esc(job.projectName || 'Untitled')}</div>
+          <div class="rc-meta">
+            <span>${doorCount} door${doorCount !== 1 ? 's' : ''}</span>
+            <span>${job.savedDateDisplay || ''}</span>
+            ${cust.name ? `<br><span>${esc(cust.name)}</span>` : ''}
+          </div>
+        </div>`;
+      }).join('')}
+    </div>
+  </div>`;
 }
 
 function toggleCol(key) {
@@ -1741,6 +1888,51 @@ function copyDoor(idx) {
   state.doors.splice(idx + 1, 0, copy);
   render();
   showToast('Row copied');
+}
+
+// ════════════════════════════════════════════
+// ROW DRAG TO REORDER
+// ════════════════════════════════════════════
+let _dragRowIdx = null;
+
+function rowDragStart(idx, e) {
+  _dragRowIdx = idx;
+  e.dataTransfer.effectAllowed = 'move';
+  // Style the dragged row
+  setTimeout(() => {
+    const leftRows = document.querySelectorAll('#scheduleLeft tbody tr');
+    const rightRows = document.querySelectorAll('#scheduleRight tbody tr');
+    if (leftRows[idx]) leftRows[idx].classList.add('row-dragging');
+    if (rightRows[idx]) rightRows[idx].classList.add('row-dragging');
+  }, 0);
+}
+
+function rowDragEnd(e) {
+  _dragRowIdx = null;
+  document.querySelectorAll('.row-dragging, .row-drag-over').forEach(el => {
+    el.classList.remove('row-dragging', 'row-drag-over');
+  });
+}
+
+function rowDragOver(idx, e) {
+  e.preventDefault();
+  e.dataTransfer.dropEffect = 'move';
+  // Clear previous highlights
+  document.querySelectorAll('.row-drag-over').forEach(el => el.classList.remove('row-drag-over'));
+  // Highlight target row
+  const leftRows = document.querySelectorAll('#scheduleLeft tbody tr');
+  const rightRows = document.querySelectorAll('#scheduleRight tbody tr');
+  if (leftRows[idx]) leftRows[idx].classList.add('row-drag-over');
+  if (rightRows[idx]) rightRows[idx].classList.add('row-drag-over');
+}
+
+function rowDrop(targetIdx, e) {
+  e.preventDefault();
+  if (_dragRowIdx === null || _dragRowIdx === targetIdx) return;
+  const door = state.doors.splice(_dragRowIdx, 1)[0];
+  state.doors.splice(targetIdx, 0, door);
+  _dragRowIdx = null;
+  render();
 }
 
 // Text-only fields that don't affect costs — update silently without full re-render
@@ -2146,6 +2338,14 @@ function renderExport() {
           <button class="btn btn-primary" onclick="exportRatesDB()">Export Rates DB</button>
           <button class="btn btn-outline" onclick="document.getElementById('ratesDBInput').click()" style="margin-left:8px">Import Rates DB</button>
           <input type="file" id="ratesDBInput" accept=".json" style="display:none" onchange="importRatesDB(event)">
+        </div>
+        <div class="export-card" style="border:2px solid var(--primary);background:#F8FBFF">
+          <h3>&#128190; Full Backup</h3>
+          <p>Back up <strong>everything</strong> — all saved jobs, rates, hardware database, client address book, custom categories, frame finishes, and column settings. One file to restore it all.</p>
+          <button class="btn btn-primary" onclick="exportFullBackup()" style="font-weight:700">&#11015; Download Full Backup</button>
+          <button class="btn btn-outline" onclick="document.getElementById('backupInput').click()" style="margin-left:8px">&#11014; Restore from Backup</button>
+          <input type="file" id="backupInput" accept=".json" style="display:none" onchange="importFullBackup(event)">
+          <p style="margin-top:12px;font-size:12px;color:var(--text-muted)">Last backup: ${localStorage.getItem('matrix_last_backup') || 'Never'}</p>
         </div>
       </div>
     </div>
@@ -2732,12 +2932,14 @@ function buildJobData() {
 }
 
 // Quick save — updates existing job if loaded, or creates new
-function quickSave() {
+function quickSave(silent) {
   const job = buildJobData();
   if (fbReady) {
     saveJobToFirebase(job, state.currentJobId).then((docId) => {
       if (!state.currentJobId) state.currentJobId = docId;
-      showToast('Saved: ' + state.projectName);
+      saveToStorage(); // persist currentJobId
+      if (!silent) showToast('Saved: ' + state.projectName);
+      else showToast('Auto-saved');
     }).catch(() => {
       showToast('Save failed — try again');
     });
@@ -2754,8 +2956,16 @@ function quickSave() {
       state.savedJobs.push(job);
     }
     saveToStorage();
-    showToast('Saved: ' + state.projectName);
+    if (!silent) showToast('Saved: ' + state.projectName);
+    else showToast('Auto-saved');
   }
+}
+
+function saveAsNew() {
+  // Clear currentJobId so it creates a fresh entry
+  state.currentJobId = null;
+  quickSave();
+  showToast('Saved as new project: ' + state.projectName);
 }
 
 // Save as new job (always creates a new entry)
@@ -2903,6 +3113,197 @@ function importRatesDB(event) {
   };
   reader.readAsText(file);
   event.target.value = '';
+}
+
+// ════════════════════════════════════════════
+// FULL BACKUP / RESTORE
+// ════════════════════════════════════════════
+function exportFullBackup() {
+  // Gather everything
+  const backup = {
+    _type: 'MatrixFullBackup',
+    _version: 2,
+    exportDate: new Date().toISOString(),
+    exportDateDisplay: new Date().toLocaleString('en-GB'),
+    // Current project
+    currentProject: {
+      projectName: state.projectName,
+      markup: state.markup,
+      doors: JSON.parse(JSON.stringify(state.doors)),
+      nextId: state.nextId,
+      hiddenCols: [...state.hiddenCols],
+      customer: JSON.parse(JSON.stringify(state.customer)),
+      currentJobId: state.currentJobId,
+    },
+    // All rates & hardware database
+    rates: JSON.parse(JSON.stringify(state.rates)),
+    // All saved jobs
+    savedJobs: state.savedJobs.map(j => {
+      const copy = { ...j };
+      // Ensure doors/rates are parsed objects not strings
+      if (typeof copy.doors === 'string') copy.doors = JSON.parse(copy.doors);
+      if (typeof copy.rates === 'string') copy.rates = JSON.parse(copy.rates);
+      if (typeof copy.customer === 'string') copy.customer = JSON.parse(copy.customer);
+      return copy;
+    }),
+    // Client address book
+    clients: JSON.parse(JSON.stringify(state.clients)),
+    // Custom hardware categories
+    customCategories: HW_CATEGORIES.filter(c => !BUILTIN_HW_KEYS.includes(c.key)),
+    // Custom frame finishes
+    customFrameFinishes: FRAME_FINISHES.filter(f => !['PRIMED','HARDWOOD/OAK','HARDWOOD SPRAY','SPRAY'].includes(f)),
+    // Column order
+    colOrder: state.colOrder,
+    // Column size preference
+    colSize: state.colSize,
+  };
+  const data = JSON.stringify(backup, null, 2);
+  const blob = new Blob([data], { type: 'application/json' });
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  const datestamp = new Date().toISOString().slice(0,10);
+  a.download = `Matrix_Full_Backup_${datestamp}.json`;
+  a.click();
+  localStorage.setItem('matrix_last_backup', new Date().toLocaleString('en-GB'));
+  showToast('Full backup downloaded!');
+}
+
+function importFullBackup(event) {
+  const file = event.target.files[0];
+  if (!file) return;
+  const reader = new FileReader();
+  reader.onload = function(e) {
+    try {
+      const backup = JSON.parse(e.target.result);
+      if (backup._type !== 'MatrixFullBackup') {
+        showToast('This is not a Matrix backup file');
+        return;
+      }
+      // Confirm before overwriting
+      const jobCount = (backup.savedJobs || []).length;
+      const clientCount = (backup.clients || []).length;
+      const catCount = (backup.customCategories || []).length;
+      state.modal = {
+        title: 'Restore from Backup',
+        body: `<p>This backup was created on <strong>${backup.exportDateDisplay || 'unknown date'}</strong>.</p>
+          <p style="margin-top:8px">It contains:</p>
+          <ul style="margin:8px 0 0 20px;font-size:13px;line-height:1.8">
+            <li><strong>${jobCount}</strong> saved job${jobCount !== 1 ? 's' : ''}</li>
+            <li><strong>${clientCount}</strong> saved client${clientCount !== 1 ? 's' : ''}</li>
+            <li><strong>${catCount}</strong> custom hardware categor${catCount !== 1 ? 'ies' : 'y'}</li>
+            <li>Full rates &amp; hardware database</li>
+            <li>Current project &amp; settings</li>
+          </ul>
+          <p style="margin-top:12px;color:var(--red);font-weight:600">This will replace all your current data. Are you sure?</p>`,
+        action: 'confirmRestore()',
+      };
+      // Store backup data temporarily for confirmation
+      window._pendingRestore = backup;
+      render();
+    } catch(err) {
+      showToast('Error reading backup file');
+      console.error(err);
+    }
+  };
+  reader.readAsText(file);
+  event.target.value = '';
+}
+
+function confirmRestore() {
+  const backup = window._pendingRestore;
+  if (!backup) { showToast('No backup data found'); return; }
+
+  // Restore custom categories
+  if (backup.customCategories) {
+    for (const cc of backup.customCategories) {
+      if (!HW_CATEGORIES.find(c => c.key === cc.key)) {
+        HW_CATEGORIES.push(cc);
+      }
+      if (!SCHEDULE_COLS.find(sc => sc.key === cc.key)) {
+        SCHEDULE_COLS.push({ key: cc.key, label: cc.label, group: 'hw' });
+      }
+    }
+  }
+
+  // Restore custom frame finishes
+  if (backup.customFrameFinishes) {
+    for (const ff of backup.customFrameFinishes) {
+      if (!FRAME_FINISHES.includes(ff)) {
+        FRAME_FINISHES.push(ff);
+        FRAME_FINISH_KEY_MAP[ff] = frameFinishKey(ff);
+      }
+    }
+  }
+
+  // Restore rates
+  if (backup.rates) {
+    state.rates = JSON.parse(JSON.stringify(backup.rates));
+  }
+
+  // Restore current project
+  if (backup.currentProject) {
+    const p = backup.currentProject;
+    state.projectName = p.projectName || 'New Project';
+    state.markup = p.markup ?? 0.22;
+    state.doors = p.doors || [];
+    state.nextId = p.nextId || state.doors.length + 1;
+    state.hiddenCols = new Set(p.hiddenCols || []);
+    state.customer = p.customer || { name:'', site:'', contact:'', phone:'', email:'', poNumber:'', notes:'' };
+    state.currentJobId = p.currentJobId || null;
+  }
+
+  // Restore saved jobs
+  if (backup.savedJobs) {
+    state.savedJobs = backup.savedJobs.map(j => {
+      const copy = { ...j };
+      // Keep as objects for local use — Firebase listener will handle its own format
+      return copy;
+    });
+  }
+
+  // Restore clients
+  if (backup.clients) {
+    state.clients = JSON.parse(JSON.stringify(backup.clients));
+    localStorage.setItem('matrix_clients', JSON.stringify(state.clients));
+  }
+
+  // Restore column order
+  if (backup.colOrder) {
+    state.colOrder = backup.colOrder;
+    localStorage.setItem('matrix_col_order', JSON.stringify(state.colOrder));
+  }
+
+  // Restore column size
+  if (backup.colSize) {
+    state.colSize = backup.colSize;
+    localStorage.setItem('matrix_col_size', state.colSize);
+  }
+
+  // Save everything to localStorage and Firebase
+  saveToStorage();
+  saveRatesToFirebase();
+
+  // Push saved jobs back to Firebase if connected
+  if (fbReady && backup.savedJobs) {
+    backup.savedJobs.forEach(job => {
+      const data = { ...job };
+      delete data._fbId;
+      delete data._localId;
+      data.rates = typeof data.rates === 'string' ? data.rates : JSON.stringify(data.rates || {});
+      data.doors = typeof data.doors === 'string' ? data.doors : JSON.stringify(data.doors || []);
+      if (typeof data.customer === 'object') data.customer = JSON.stringify(data.customer);
+      if (job._fbId) {
+        db.collection('jobs').doc(job._fbId).set(data).catch(() => {});
+      } else {
+        db.collection('jobs').add(data).catch(() => {});
+      }
+    });
+  }
+
+  window._pendingRestore = null;
+  state.modal = null;
+  render();
+  showToast('Backup restored! (' + (backup.exportDateDisplay || 'unknown date') + ')');
 }
 
 // ════════════════════════════════════════════
