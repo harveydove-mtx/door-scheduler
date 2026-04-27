@@ -34,15 +34,25 @@ body { font-family: 'Segoe UI', system-ui, -apple-system, sans-serif; background
 
 /* Layout */
 .app { display: flex; height: 100vh; }
-.sidebar { width: 230px; background: var(--primary); color: white; display: flex; flex-direction: column; flex-shrink: 0; }
-.sidebar-logo { padding: 22px 20px; font-size: 16px; font-weight: 700; border-bottom: 1px solid rgba(255,255,255,0.15); letter-spacing: 0.5px; }
+.sidebar { width: 230px; background: var(--primary); color: white; display: flex; flex-direction: column; flex-shrink: 0; transition: width 0.2s ease; }
+.sidebar.collapsed { width: 56px; }
+.sidebar-logo { padding: 22px 20px; font-size: 16px; font-weight: 700; border-bottom: 1px solid rgba(255,255,255,0.15); letter-spacing: 0.5px; white-space: nowrap; overflow: hidden; }
 .sidebar-logo span { display: block; font-size: 12px; font-weight: 400; opacity: 0.7; margin-top: 3px; }
+.sidebar.collapsed .sidebar-logo { padding: 22px 14px; font-size: 0; }
+.sidebar.collapsed .sidebar-logo::before { content: 'M'; font-size: 20px; font-weight: 700; }
+.sidebar.collapsed .sidebar-logo span { display: none; }
 .sidebar-nav { flex: 1; padding: 14px 0; }
-.nav-item { display: flex; align-items: center; gap: 12px; padding: 12px 22px; cursor: pointer; font-size: 14px; font-weight: 500; transition: background 0.15s; border-left: 3px solid transparent; }
+.nav-item { display: flex; align-items: center; gap: 12px; padding: 12px 22px; cursor: pointer; font-size: 14px; font-weight: 500; transition: background 0.15s; border-left: 3px solid transparent; white-space: nowrap; overflow: hidden; }
 .nav-item:hover { background: rgba(255,255,255,0.1); }
 .nav-item.active { background: rgba(255,255,255,0.15); border-left-color: white; }
-.nav-item svg { width: 20px; height: 20px; opacity: 0.8; }
+.nav-item svg { width: 20px; height: 20px; opacity: 0.8; flex-shrink: 0; }
 .nav-badge { margin-left: auto; background: var(--red); color: white; font-size: 11px; font-weight: 700; padding: 2px 8px; border-radius: 10px; }
+.sidebar.collapsed .nav-item { padding: 12px 0; justify-content: center; gap: 0; border-left-width: 3px; }
+.sidebar.collapsed .nav-item > *:not(svg) { display: none; }
+.sidebar.collapsed .nav-item svg { margin: 0; }
+.sidebar-toggle { padding: 10px; border-top: 1px solid rgba(255,255,255,0.15); display: flex; align-items: center; justify-content: center; cursor: pointer; opacity: 0.7; transition: opacity 0.15s; }
+.sidebar-toggle:hover { opacity: 1; background: rgba(255,255,255,0.1); }
+.sidebar-toggle svg { width: 18px; height: 18px; }
 .main { flex: 1; display: flex; flex-direction: column; overflow: hidden; }
 
 /* Header */
@@ -669,6 +679,8 @@ let state = {
   clients: JSON.parse(localStorage.getItem('matrix_clients') || '[]'),
   // Find & replace
   showFindReplace: false,
+  // Sidebar
+  sidebarCollapsed: localStorage.getItem('matrix_sidebar_collapsed') === 'true',
 };
 
 // Load local data first, then connect Firebase
@@ -998,7 +1010,7 @@ function render() {
   try { allWarnings = state.doors.flatMap(d => getWarnings(d).map(w => ({ doorId: d.doorId || `Row ${d.id}`, msg: w }))); } catch(e) { console.warn('Warnings calc error:', e); }
 
   try { app.innerHTML = `
-    <div class="sidebar">
+    <div class="sidebar ${state.sidebarCollapsed ? 'collapsed' : ''}">
       <div class="sidebar-logo">MATRIX HARDWARE<span>Door Scheduler</span></div>
       <div class="sidebar-nav">
         <div class="nav-item ${state.page==='schedule'?'active':''}" onclick="nav('schedule')">
@@ -1027,6 +1039,13 @@ function render() {
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="12" y1="18" x2="12" y2="12"/><line x1="9" y1="15" x2="15" y2="15"/></svg>
           New Project
         </div>
+      </div>
+      <div class="sidebar-toggle" onclick="toggleSidebar()" title="${state.sidebarCollapsed ? 'Expand sidebar' : 'Collapse sidebar'}">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          ${state.sidebarCollapsed
+            ? '<path d="M13 17l5-5-5-5M6 17l5-5-5-5"/>'
+            : '<path d="M11 17l-5-5 5-5M18 17l-5-5 5-5"/>'}
+        </svg>
       </div>
     </div>
     <div class="main">
@@ -1162,6 +1181,10 @@ document.addEventListener('keydown', function(e) {
   // Ctrl+S = Save
   if ((e.ctrlKey || e.metaKey) && e.key === 's') {
     e.preventDefault(); quickSave(); return;
+  }
+  // Ctrl+B = Toggle sidebar
+  if ((e.ctrlKey || e.metaKey) && e.key === 'b') {
+    e.preventDefault(); toggleSidebar(); return;
   }
 });
 
@@ -1655,12 +1678,28 @@ function renderFilterDropdown(colKey) {
 let _dragColKey = null;
 
 function getOrderedCols() {
-  // Return SCHEDULE_COLS + custom categories in the user's custom order (if set)
+  // Return SCHEDULE_COLS + truly custom categories in the user's custom order (if set)
   const allCols = [...SCHEDULE_COLS];
-  // Add custom hw categories
-  const builtInKeys = SCHEDULE_COLS.map(c => c.key);
+  // Map HW_CATEGORIES keys to their matching SCHEDULE_COLS singular keys
+  // e.g. hinges→hinge, closers→closer, lockcases→lockcase, etc.
+  const builtInKeys = new Set(SCHEDULE_COLS.map(c => c.key));
+  // Also build a set of known HW_CATEGORIES keys that map to built-in SCHEDULE_COLS
+  const hwToScheduleMap = {};
   for (const cat of HW_CATEGORIES) {
-    if (!builtInKeys.includes(cat.key)) {
+    // Check direct match first
+    if (builtInKeys.has(cat.key)) { hwToScheduleMap[cat.key] = cat.key; continue; }
+    // Try dropping trailing 's' (hinges→hinge, closers→closer, levers→lever, doorStops→doorStop)
+    const dropS = cat.key.replace(/s$/, '');
+    if (builtInKeys.has(dropS)) { hwToScheduleMap[cat.key] = dropS; continue; }
+    // Try dropping trailing 'es' and keep 'e' (lockcases→lockcase — but 'lockcase' ends in 'e' already)
+    if (cat.key.endsWith('es')) {
+      const dropES = cat.key.slice(0, -1);  // e.g. lockcases → lockcase
+      if (builtInKeys.has(dropES)) { hwToScheduleMap[cat.key] = dropES; continue; }
+    }
+  }
+  // Only add HW_CATEGORIES entries that are genuinely new (user-created custom categories)
+  for (const cat of HW_CATEGORIES) {
+    if (!hwToScheduleMap[cat.key]) {
       allCols.push({ key: cat.key, label: cat.label, group: 'hw' });
     }
   }
@@ -1879,7 +1918,16 @@ function deleteClient(idx) {
 
 function addDoor() { state.doors.push(createDoor()); render(); }
 function addMultipleDoors() { for(let i=0;i<10;i++) state.doors.push(createDoor()); render(); }
-function deleteDoor(idx) { state.doors.splice(idx, 1); render(); }
+function deleteDoor(idx) {
+  const door = state.doors[idx];
+  const label = door.doorId || ('Row ' + (idx + 1));
+  state.modal = {
+    title: 'Delete Door',
+    body: `<p>Delete <strong>${esc(label)}</strong>?${door.doorType ? ' (' + esc(door.doorType) + ')' : ''}</p><p style="font-size:12px;color:var(--text-muted);margin-top:8px">Tip: Ctrl+Z to undo after deleting.</p>`,
+    action: `state.doors.splice(${idx},1);state.modal=null;render();showToast('Deleted: ${esc(label)}')`,
+  };
+  render();
+}
 function copyDoor(idx) {
   const src = state.doors[idx];
   const copy = JSON.parse(JSON.stringify(src));
@@ -2421,8 +2469,8 @@ function exportPDF() {
   const quoteRef = 'MH-' + Date.now().toString(36).toUpperCase();
 
   // ── COVER / HEADER ──
-  // Blue header bar
-  doc.setFillColor(47, 84, 150);
+  // Purple header bar
+  doc.setFillColor(82, 0, 109);
   doc.rect(0, 0, pw, 28, 'F');
   doc.setTextColor(255, 255, 255);
   doc.setFontSize(22);
@@ -2455,7 +2503,7 @@ function exportPDF() {
   const totalSell = state.doors.reduce((s, d) => s + calcSellPrice(d), 0);
   const totalCost = state.doors.reduce((s, d) => s + calcTotalCost(d), 0);
   y += 3;
-  doc.setFillColor(214, 228, 240);
+  doc.setFillColor(232, 214, 240);
   doc.rect(14, y - 4, pw - 28, 8, 'F');
   doc.setFont('helvetica', 'bold');
   doc.setFontSize(10);
@@ -2516,14 +2564,14 @@ function exportPDF() {
   doc.autoTable({
     head: [headers], body: body, startY: y, theme: 'grid',
     styles: { fontSize: fontSize, cellPadding: 1.5, overflow: 'linebreak' },
-    headStyles: { fillColor: [47, 84, 150], fontSize: fontSize, fontStyle: 'bold' },
-    alternateRowStyles: { fillColor: [240, 244, 255] },
+    headStyles: { fillColor: [82, 0, 109], fontSize: fontSize, fontStyle: 'bold' },
+    alternateRowStyles: { fillColor: [245, 240, 250] },
     margin: { left: 8, right: 8 },
     tableWidth: 'auto',
     didParseCell: function(data) {
       if (data.row.index === body.length - 1) {
         data.cell.styles.fontStyle = 'bold';
-        data.cell.styles.fillColor = [214, 228, 240];
+        data.cell.styles.fillColor = [232, 214, 240];
       }
     }
   });
@@ -2535,7 +2583,7 @@ function exportPDF() {
     if (fy > ph - 40) { doc.addPage(); fy = 15; }
     doc.setFontSize(8);
     doc.setFont('helvetica', 'bold');
-    doc.setTextColor(47, 84, 150);
+    doc.setTextColor(82, 0, 109);
     doc.text('Terms & Conditions', 14, fy);
     doc.setFont('helvetica', 'normal');
     doc.setTextColor(100, 100, 100);
@@ -2551,7 +2599,7 @@ function exportPDF() {
     ];
     terms.forEach(t => { doc.text(t, 14, fy); fy += 4; });
     fy += 4;
-    doc.setTextColor(47, 84, 150);
+    doc.setTextColor(82, 0, 109);
     doc.setFont('helvetica', 'bold');
     doc.text('Matrix Hardware  |  Architectural Ironmongery Specialists', 14, fy);
     doc.setFont('helvetica', 'normal');
@@ -2806,6 +2854,12 @@ function saveProject() {
   const a = document.createElement('a'); a.href = URL.createObjectURL(blob);
   a.download = `${state.projectName.replace(/\s+/g,'_')}.json`; a.click();
   showToast('Project saved!');
+}
+
+function toggleSidebar() {
+  state.sidebarCollapsed = !state.sidebarCollapsed;
+  localStorage.setItem('matrix_sidebar_collapsed', state.sidebarCollapsed);
+  render();
 }
 
 function newProject() {
