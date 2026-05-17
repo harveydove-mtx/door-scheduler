@@ -9,6 +9,7 @@
 <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
 <!-- Firebase -->
 <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-auth-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore-compat.js"></script>
 <style>
 :root {
@@ -302,11 +303,63 @@ body { font-family: 'Segoe UI', system-ui, -apple-system, sans-serif; background
   border: 1px solid var(--accent); border-radius: 4px; font-size: 11px; color: var(--text);
 }
 .filter-tag .remove-filter { cursor: pointer; color: var(--red); font-weight: 700; padding: 0 2px; }
+
+/* ═══ LOGIN OVERLAY ═══ */
+#loginOverlay {
+  position: fixed; inset: 0; background: linear-gradient(135deg, #2F5496 0%, #1a3060 100%);
+  display: flex; align-items: center; justify-content: center; z-index: 9999;
+  font-family: 'Segoe UI', system-ui, -apple-system, sans-serif;
+}
+#loginOverlay.hidden { display: none; }
+.login-card {
+  background: white; padding: 40px 36px; border-radius: 10px; width: 360px;
+  box-shadow: 0 20px 60px rgba(0,0,0,0.35);
+}
+.login-logo { text-align: center; margin-bottom: 8px; font-size: 22px; font-weight: 700; color: var(--primary); letter-spacing: 0.5px; }
+.login-sub { text-align: center; color: var(--text-muted); font-size: 13px; margin-bottom: 26px; }
+.login-field { margin-bottom: 14px; }
+.login-field label { display: block; font-size: 12px; font-weight: 600; color: var(--text); margin-bottom: 5px; }
+.login-field input {
+  width: 100%; padding: 10px 12px; border: 1px solid var(--border); border-radius: 6px;
+  font-size: 14px; font-family: inherit; outline: none; transition: border-color 0.15s;
+}
+.login-field input:focus { border-color: var(--primary); }
+.login-btn {
+  width: 100%; padding: 11px; background: var(--primary); color: white;
+  border: none; border-radius: 6px; font-size: 14px; font-weight: 600;
+  cursor: pointer; margin-top: 6px; transition: background 0.15s;
+}
+.login-btn:hover { background: #244480; }
+.login-btn:disabled { background: var(--text-muted); cursor: not-allowed; }
+.login-error {
+  background: var(--red-light); color: var(--red); padding: 10px 12px; border-radius: 6px;
+  font-size: 12px; margin-bottom: 14px; display: none;
+}
+.login-error.show { display: block; }
 </style>
 </head>
 <body>
 
-<div class="app" id="app"></div>
+<!-- ═══ LOGIN OVERLAY (shown until signed in) ═══ -->
+<div id="loginOverlay">
+  <form class="login-card" onsubmit="event.preventDefault(); doLogin();">
+    <div class="login-logo">Matrix Hardware</div>
+    <div class="login-sub">Door Scheduler &amp; Quotation</div>
+    <div class="login-error" id="loginError"></div>
+    <div class="login-field">
+      <label for="loginEmail">Email</label>
+      <input type="email" id="loginEmail" autocomplete="username" required>
+    </div>
+    <div class="login-field">
+      <label for="loginPassword">Password</label>
+      <input type="password" id="loginPassword" autocomplete="current-password" required>
+    </div>
+    <button type="submit" class="login-btn" id="loginBtn">Sign in</button>
+    <div class="login-footer">Internal tool. Accounts managed by administrator.</div>
+  </form>
+</div>
+
+<div class="app" id="app" style="display:none"></div>
 
 <script>
 // ════════════════════════════════════════════
@@ -471,13 +524,26 @@ const FIREBASE_CONFIG = {
 // FIREBASE + LOCAL STORAGE PERSISTENCE
 // ════════════════════════════════════════════
 let db = null;           // Firestore reference
-let fbReady = false;     // true when Firebase connected
+let fbReady = false;     // true when Firestore connected AND user signed in
 let _skipFireSync = false; // prevent loops from real-time listener
+let _firebaseAppReady = false; // firebase.initializeApp() has run
 
-function initFirebase() {
+// Initialise the Firebase SDK once (does NOT touch Firestore yet — that waits for sign-in)
+function initFirebaseApp() {
+  if (_firebaseAppReady) return true;
   if (!FIREBASE_CONFIG.apiKey) return false;
   try {
     firebase.initializeApp(FIREBASE_CONFIG);
+    _firebaseAppReady = true;
+    return true;
+  } catch(e) { console.warn('Firebase app init failed:', e); return false; }
+}
+
+// Connect Firestore and set up real-time listeners. Only call AFTER a user is signed in.
+function initFirestore() {
+  if (fbReady) return true; // already connected
+  if (!_firebaseAppReady) return false;
+  try {
     db = firebase.firestore();
     fbReady = true;
     // Enable offline persistence so it works without internet too
@@ -683,9 +749,93 @@ let state = {
   sidebarCollapsed: localStorage.getItem('matrix_sidebar_collapsed') === 'true',
 };
 
-// Load local data first, then connect Firebase
+// Load local data first
 loadFromStorage();
-const _firebaseOK = initFirebase();
+
+// ════════════════════════════════════════════
+// AUTH GATE — show login until signed in, then boot Firestore
+// ════════════════════════════════════════════
+let _currentUser = null;
+
+function showLoginError(msg) {
+  const el = document.getElementById('loginError');
+  if (!el) return;
+  el.textContent = msg;
+  el.classList.add('show');
+}
+function clearLoginError() {
+  const el = document.getElementById('loginError');
+  if (!el) return;
+  el.textContent = '';
+  el.classList.remove('show');
+}
+
+function doLogin() {
+  clearLoginError();
+  const email = (document.getElementById('loginEmail').value || '').trim();
+  const password = document.getElementById('loginPassword').value || '';
+  if (!email || !password) { showLoginError('Enter your email and password.'); return; }
+  if (!_firebaseAppReady) initFirebaseApp();
+  const btn = document.getElementById('loginBtn');
+  if (btn) { btn.disabled = true; btn.textContent = 'Signing in...'; }
+  firebase.auth().signInWithEmailAndPassword(email, password)
+    .catch(err => {
+      const code = err && err.code ? err.code : '';
+      let msg = 'Sign-in failed. Please try again.';
+      if (code === 'auth/invalid-email') msg = 'That email address is not valid.';
+      else if (code === 'auth/user-disabled') msg = 'This account has been disabled.';
+      else if (code === 'auth/user-not-found' || code === 'auth/wrong-password' || code === 'auth/invalid-credential' || code === 'auth/invalid-login-credentials') msg = 'Incorrect email or password.';
+      else if (code === 'auth/too-many-requests') msg = 'Too many attempts. Try again later or reset your password.';
+      else if (code === 'auth/network-request-failed') msg = 'Network error. Check your internet connection.';
+      showLoginError(msg);
+    })
+    .finally(() => {
+      if (btn) { btn.disabled = false; btn.textContent = 'Sign in'; }
+    });
+}
+
+function doSignOut() {
+  if (!confirm('Sign out of the Door Scheduler on this device?')) return;
+  firebase.auth().signOut();
+}
+
+function _onSignedIn(user) {
+  _currentUser = user;
+  const overlay = document.getElementById('loginOverlay');
+  if (overlay) overlay.classList.add('hidden');
+  const appEl = document.getElementById('app');
+  if (appEl) appEl.style.display = '';
+  const pw = document.getElementById('loginPassword');
+  if (pw) pw.value = '';
+  initFirestore();
+  render();
+}
+
+function _onSignedOut() {
+  _currentUser = null;
+  fbReady = false;
+  db = null;
+  const overlay = document.getElementById('loginOverlay');
+  if (overlay) overlay.classList.remove('hidden');
+  const appEl = document.getElementById('app');
+  if (appEl) appEl.style.display = 'none';
+  setTimeout(() => { const e = document.getElementById('loginEmail'); if (e) e.focus(); }, 50);
+}
+
+// Boot: initialise Firebase, then watch auth state
+if (initFirebaseApp()) {
+  firebase.auth().onAuthStateChanged(user => {
+    if (user) _onSignedIn(user);
+    else _onSignedOut();
+  });
+} else {
+  console.warn('Firebase did not initialise — running offline only.');
+  const overlay = document.getElementById('loginOverlay');
+  if (overlay) overlay.classList.add('hidden');
+  const appEl = document.getElementById('app');
+  if (appEl) appEl.style.display = '';
+  render();
+}
 
 // ════════════════════════════════════════════
 // UNDO / REDO HISTORY
@@ -1040,6 +1190,10 @@ function render() {
           New Project
         </div>
       </div>
+      ${_currentUser ? `<div style="padding:12px 18px;border-top:1px solid rgba(255,255,255,0.15);font-size:11px">
+        <div style="opacity:0.7;margin-bottom:4px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${esc(_currentUser.email || '')}">${esc(_currentUser.email || 'Signed in')}</div>
+        <div onclick="doSignOut()" style="cursor:pointer;color:#ffb3b3;font-weight:600" onmouseover="this.style.color='white'" onmouseout="this.style.color='#ffb3b3'">&#x2192; Sign out</div>
+      </div>` : ''}
       <div class="sidebar-toggle" onclick="toggleSidebar()" title="${state.sidebarCollapsed ? 'Expand sidebar' : 'Collapse sidebar'}">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
           ${state.sidebarCollapsed
@@ -3425,8 +3579,8 @@ function confirmDeleteCategory(catKey) {
   showToast('Category deleted');
 }
 
-// Initial render
-render();
+// Note: initial render is triggered by the auth state listener (see _onSignedIn above)
+// so the app only displays after the user is signed in.
 </script>
 </body>
 </html>
