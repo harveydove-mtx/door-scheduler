@@ -476,6 +476,7 @@ const OVER_PANEL_TYPES = ['NONE','SOLID','GLAZED'];
 // All schedule columns that can be toggled
 const SCHEDULE_COLS = [
   { key:'doorId',      label:'Door ID',     group:'info' },
+  { key:'qty',         label:'Qty',          group:'info' },
   { key:'doorType',    label:'Door Type',    group:'info' },
   { key:'width',       label:'Width',        group:'info' },
   { key:'height',      label:'Height',       group:'info' },
@@ -585,12 +586,24 @@ function initFirestore() {
       if (_skipFireSync) return;
       state.savedJobs = [];
       snap.forEach(doc => {
-        state.savedJobs.push({ _fbId: doc.id, ...doc.data() });
+        const d = doc.data();
+        // v20 normalisation: backfill missing fields on old jobs so UI never sees undefined
+        if (!d.status) d.status = 'outstanding';
+        if (d.folderId === undefined) d.folderId = null;
+        state.savedJobs.push({ _fbId: doc.id, ...d });
       });
       // Sort by saved date descending
       state.savedJobs.sort((a,b) => (b.savedDate||'').localeCompare(a.savedDate||''));
-      // Only re-render if we're on the jobs page to avoid disruption
-      if (state.page === 'jobs') render();
+      // Re-render on any page that depends on saved jobs (dashboard, jobs, sidebar count)
+      render();
+    });
+    // v20: Listen for real-time changes to folders
+    db.collection('folders').onSnapshot(snap => {
+      if (_skipFireSync) return;
+      state.folders = [];
+      snap.forEach(doc => state.folders.push({ id: doc.id, ...doc.data() }));
+      state.folders.sort((a,b) => (a.name||'').localeCompare(b.name||''));
+      if (state.page === 'jobs' || state.page === 'dashboard') render();
     });
     return true;
   } catch(e) { console.warn('Firebase init failed:', e); return false; }
@@ -671,6 +684,104 @@ function deleteJobFromFirebase(job) {
   return db.collection('jobs').doc(job._fbId).delete();
 }
 
+// ════════════════════════════════════════════
+// v20: FOLDER + STATUS HELPERS
+// ════════════════════════════════════════════
+function createFolder(name, parentId) {
+  if (!fbReady) { showToast('Folders require cloud connection — sign in first.'); return Promise.resolve(); }
+  const data = { name: String(name || 'New folder').trim() || 'New folder', parentId: parentId || null, createdAt: new Date().toISOString() };
+  return db.collection('folders').add(data);
+}
+function renameFolder(folderId, newName) {
+  if (!fbReady) return Promise.resolve();
+  return db.collection('folders').doc(folderId).update({ name: String(newName || '').trim() || 'Folder' });
+}
+function deleteFolderDoc(folderId) {
+  if (!fbReady) return Promise.resolve();
+  return db.collection('folders').doc(folderId).delete();
+}
+function setJobStatus(job, newStatus) {
+  if (!['outstanding','won','lost'].includes(newStatus)) return Promise.resolve();
+  const patch = { status: newStatus, statusChangedAt: new Date().toISOString() };
+  if (fbReady && job._fbId) return db.collection('jobs').doc(job._fbId).update(patch);
+  // local-only fallback
+  Object.assign(job, patch);
+  saveToStorage();
+  render();
+  return Promise.resolve();
+}
+function setJobFolder(job, folderId) {
+  const patch = { folderId: folderId || null };
+  if (fbReady && job._fbId) return db.collection('jobs').doc(job._fbId).update(patch);
+  Object.assign(job, patch);
+  saveToStorage();
+  render();
+  return Promise.resolve();
+}
+// Build folder tree: returns array of {folder, children: [...]} for root level (parentId === null)
+function buildFolderTree(parentId) {
+  parentId = parentId === undefined ? null : parentId;
+  return state.folders
+    .filter(f => (f.parentId || null) === parentId)
+    .map(f => ({ folder: f, children: buildFolderTree(f.id) }));
+}
+// Count jobs in folder (recursive across sub-folders), optionally filtered by status
+function folderJobCount(folderId, statusFilter) {
+  const directIds = new Set();
+  function gather(parentId) {
+    directIds.add(parentId);
+    state.folders.filter(f => (f.parentId || null) === parentId).forEach(f => gather(f.id));
+  }
+  gather(folderId);
+  return state.savedJobs.filter(j => directIds.has(j.folderId || null) && (!statusFilter || statusFilter === 'all' || j.status === statusFilter)).length;
+}
+// Get folder display path e.g. "Pinnacle / 2026 / Phase 2"
+function folderPath(folderId) {
+  const parts = [];
+  let cur = state.folders.find(f => f.id === folderId);
+  let safety = 0;
+  while (cur && safety++ < 20) {
+    parts.unshift(cur.name);
+    cur = cur.parentId ? state.folders.find(f => f.id === cur.parentId) : null;
+  }
+  return parts.join(' / ');
+}
+function toggleFolderExpanded(folderId) {
+  if (state.expandedFolders.has(folderId)) state.expandedFolders.delete(folderId);
+  else state.expandedFolders.add(folderId);
+  localStorage.setItem('matrix_expanded_folders', JSON.stringify([...state.expandedFolders]));
+  render();
+}
+// Status meta — colours + labels
+const STATUS_META = {
+  outstanding: { label: 'Outstanding', color: 'var(--accent)', bg: 'var(--accent-light)', emoji: '\u23F3' },
+  won:         { label: 'Won',         color: 'var(--green)',  bg: 'var(--green-light)',  emoji: '\u2714' },
+  lost:        { label: 'Lost',        color: 'var(--red)',    bg: 'var(--red-light)',    emoji: '\u2716' },
+};
+function statusBadge(status) {
+  const m = STATUS_META[status] || STATUS_META.outstanding;
+  return `<span style="display:inline-flex;align-items:center;gap:4px;padding:3px 10px;border-radius:12px;font-size:11px;font-weight:700;color:${m.color};background:${m.bg}">${m.emoji} ${m.label}</span>`;
+}
+// Compute total sell of a saved job (prefers snapshot, falls back to live calc)
+function jobTotalSell(job) {
+  if (typeof job.totalSellSnapshot === 'number') return job.totalSellSnapshot;
+  let doors = job.doors;
+  if (typeof doors === 'string') { try { doors = JSON.parse(doors); } catch(e) { doors = []; } }
+  if (!Array.isArray(doors)) return 0;
+  const rates = (typeof job.rates === 'string') ? (function(){ try { return JSON.parse(job.rates); } catch(e) { return null; } })() : job.rates;
+  const markup = parseFloat(job.markup) || 0.22;
+  if (!rates) return 0;
+  // simplified — use saved doors' costs if present, otherwise 0
+  return 0;
+}
+function jobAgeDays(job) {
+  if (!job.savedDate) return 0;
+  const t = new Date(job.savedDate).getTime();
+  if (isNaN(t)) return 0;
+  return Math.floor((Date.now() - t) / 86400000);
+}
+
+
 function loadFromStorage() {
   try {
     // Restore custom categories first
@@ -703,7 +814,7 @@ function loadFromStorage() {
       state.projectName = proj.projectName || 'New Project';
       state.markup = proj.markup ?? 0.22;
       state.rates = proj.rates || JSON.parse(JSON.stringify(DEFAULT_RATES));
-      state.doors = proj.doors || [];
+      state.doors = (proj.doors || []).map(d => ({ qty: 1, ...d, qty: (parseInt(d && d.qty,10) >= 1 ? parseInt(d.qty,10) : 1) }));
       state.nextId = proj.nextId || state.doors.length + 1;
       state.hiddenCols = new Set(proj.hiddenCols || []);
       if (proj.customer) state.customer = proj.customer;
@@ -718,7 +829,13 @@ function loadFromStorage() {
 }
 
 let state = {
-  page: 'schedule',
+  page: 'dashboard', // v20: dashboard is the new landing page
+  // v20 — folders (loaded from Firestore 'folders' collection)
+  folders: [], // [{id, name, parentId, createdAt}]
+  expandedFolders: new Set(JSON.parse(localStorage.getItem('matrix_expanded_folders') || '[]')),
+  currentFolderId: null, // which folder is selected in the Jobs page sidebar; null = root (all)
+  jobsStatusFilter: 'outstanding', // 'all' | 'outstanding' | 'won' | 'lost'
+  jobsSearch: '',
   rates: JSON.parse(JSON.stringify(DEFAULT_RATES)),
   doors: [],
   rateCategory: 'hinges',
@@ -905,6 +1022,7 @@ startAutosave();
 function createDoor() {
   return {
     id: state.nextId++,
+    qty: 1,
     doorId: '', customerType: '', doorType: '', width: '', height: '',
     handing: 'N/A', fireRating: 'FD30', vp: 0, vpSize: '', doorFinish: 'PRIMED',
     frameFinish: 'PRIMED', archFinish: 'NONE', overPanel: 'NONE',
@@ -1034,13 +1152,26 @@ function hwBreakdown(door) {
   return lines.join('\\n');
 }
 
-function calcTotalCost(door) {
+// v20: row quantity helper — defaults to 1 if missing
+function lineQty(door) {
+  const q = parseFloat(door && door.qty);
+  if (isNaN(q) || q < 1) return 1;
+  return Math.floor(q);
+}
+
+// v20: unit cost (per single door) — kept so we can show "5 x £473" breakdowns
+function calcUnitCost(door) {
   return calcDoorCost(door) + calcFrameCost(door) + calcArchCost(door) + calcVPCost(door) + calcOverPanelCost(door) + calcHardwareCost(door) + (parseFloat(door.addedUplift) || 0);
+}
+
+function calcTotalCost(door) {
+  return calcUnitCost(door) * lineQty(door);
 }
 
 function calcSellPrice(door) {
   if (door.sellOverride !== null && door.sellOverride !== undefined && door.sellOverride !== '') {
-    return parseFloat(door.sellOverride) || 0;
+    // Override = the per-unit sell the user typed in. Multiply by qty to get the row total.
+    return (parseFloat(door.sellOverride) || 0) * lineQty(door);
   }
   return Math.round(calcTotalCost(door) * (1 + state.markup) * 100) / 100;
 }
@@ -1088,6 +1219,20 @@ function showToast(msg) {
   state.toast = msg;
   render();
   setTimeout(() => { state.toast = null; render(); }, 2500);
+}
+
+// v20: qty input handlers — accept blank while typing, snap to 1 on blur
+function updQty(idx, el) {
+  const raw = el.value;
+  if (raw === '') return; // allow blank mid-typing; blur will snap to 1
+  const n = parseInt(raw, 10);
+  state.doors[idx].qty = (isNaN(n) || n < 1) ? 1 : n;
+}
+function updQtyBlur(idx, el) {
+  const n = parseInt(el.value, 10);
+  state.doors[idx].qty = (isNaN(n) || n < 1) ? 1 : n;
+  el.value = state.doors[idx].qty;
+  render();
 }
 
 // Build a <select> with proper selected state
@@ -1163,6 +1308,10 @@ function render() {
     <div class="sidebar ${state.sidebarCollapsed ? 'collapsed' : ''}">
       <div class="sidebar-logo">MATRIX HARDWARE<span>Door Scheduler</span></div>
       <div class="sidebar-nav">
+        <div class="nav-item ${state.page==='dashboard'?'active':''}" onclick="nav('dashboard')">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/></svg>
+          Dashboard ${(state.savedJobs && state.savedJobs.filter(j=>(j.status||'outstanding')==='outstanding').length) ? `<span class="nav-badge" style="background:var(--accent)">${state.savedJobs.filter(j=>(j.status||'outstanding')==='outstanding').length}</span>` : ''}
+        </div>
         <div class="nav-item ${state.page==='schedule'?'active':''}" onclick="nav('schedule')">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M3 9h18M9 21V9"/></svg>
           Schedule
@@ -1203,6 +1352,7 @@ function render() {
       </div>
     </div>
     <div class="main">
+      ${state.page === 'dashboard' ? renderDashboard() : ''}
       ${state.page === 'schedule' ? renderSchedule() : ''}
       ${state.page === 'rates' ? renderRates() : ''}
       ${state.page === 'jobs' ? renderJobs() : ''}
@@ -1399,6 +1549,7 @@ function renderSchedule() {
   // Column definitions for the left table
   const colDefs = [
     { key:'doorId',      thClass:'', thLabel:'DOOR ID', thStyle:'', cell: (d,idx) => `<input value="${esc(d.doorId)}" oninput="updText(${idx},'doorId',this)" onblur="updTextBlur(${idx},'doorId',this)" placeholder="e.g. ROOM 14" style="min-width:150px;text-align:left">` },
+    { key:'qty',         thClass:'', thLabel:'QTY', thStyle:'min-width:60px', cell: (d,idx) => `<input type="number" min="1" step="1" value="${lineQty(d)}" oninput="updQty(${idx},this)" onblur="updQtyBlur(${idx},this)" style="width:54px;text-align:center;font-weight:600" title="Quantity of identical doors on this row">` },
     { key:'doorType',    thClass:'', thLabel:'DOOR TYPE', thStyle:'min-width:220px', cell: (d,idx) => {
       let html = sel(idx, 'doorType', doorTypeOpts, d.doorType);
       if (d.doorType === 'MANUAL') {
@@ -3069,11 +3220,177 @@ function loadProject(event) {
 // ════════════════════════════════════════════
 // SAVED JOBS PAGE
 // ════════════════════════════════════════════
-function renderJobs() {
+function renderDashboard() {
+  const outstanding = state.savedJobs.filter(j => (j.status||'outstanding') === 'outstanding');
+  const won = state.savedJobs.filter(j => j.status === 'won');
+  const lost = state.savedJobs.filter(j => j.status === 'lost');
+  const outstandingTotal = outstanding.reduce((s,j) => s + (typeof j.totalSellSnapshot === 'number' ? j.totalSellSnapshot : 0), 0);
+  const wonTotal = won.reduce((s,j) => s + (typeof j.totalSellSnapshot === 'number' ? j.totalSellSnapshot : 0), 0);
+  // Sort outstanding by oldest first (longest waiting at top)
+  const outstandingSorted = [...outstanding].sort((a,b) => (a.savedDate||'').localeCompare(b.savedDate||''));
+  const followUps = outstandingSorted.filter(j => jobAgeDays(j) >= 30);
+
+  const card = (label, value, color, sub) => `
+    <div style="background:var(--card);border-radius:8px;box-shadow:var(--shadow);padding:18px 22px;border-left:4px solid ${color};flex:1;min-width:200px">
+      <div style="font-size:11px;font-weight:700;color:var(--text-muted);letter-spacing:0.5px;margin-bottom:6px">${label}</div>
+      <div style="font-size:26px;font-weight:700;color:${color}">${value}</div>
+      ${sub ? `<div style="font-size:12px;color:var(--text-muted);margin-top:4px">${sub}</div>` : ''}
+    </div>
+  `;
+
   return `
     <div class="header">
-      <h1>Saved Jobs</h1>
+      <h1>Dashboard</h1>
       <div class="header-actions">
+        <span style="font-size:12px;color:var(--text-muted)">${new Date().toLocaleDateString('en-GB', { weekday:'long', day:'numeric', month:'long', year:'numeric' })}</span>
+        <button class="btn btn-success" onclick="newProject()">+ New Quote</button>
+      </div>
+    </div>
+    <div class="content">
+      <!-- KPI cards -->
+      <div style="display:flex;gap:14px;flex-wrap:wrap;margin-bottom:20px">
+        ${card('OUTSTANDING QUOTES', outstanding.length, 'var(--accent)', outstandingTotal ? `Estimated value: ${fmt(outstandingTotal)}` : 'No snapshot value yet')}
+        ${card('WON THIS YEAR', won.length, 'var(--green)', wonTotal ? `Value: ${fmt(wonTotal)}` : '')}
+        ${card('LOST', lost.length, 'var(--red)', '')}
+        ${card('FOLLOW-UP NEEDED', followUps.length, 'var(--purple)', '30+ days outstanding')}
+      </div>
+
+      <!-- Outstanding list -->
+      <div style="background:var(--card);border-radius:8px;box-shadow:var(--shadow);overflow:hidden">
+        <div style="padding:14px 20px;border-bottom:1px solid var(--border);display:flex;justify-content:space-between;align-items:center">
+          <h2 style="font-size:16px">Outstanding quotes <span style="color:var(--text-muted);font-weight:400;font-size:13px">(oldest first)</span></h2>
+          <button class="btn btn-outline btn-sm" onclick="nav('jobs')">All saved jobs &rarr;</button>
+        </div>
+        ${outstandingSorted.length === 0 ? `
+          <div style="padding:40px;text-align:center;color:var(--text-muted)">
+            <div style="font-size:36px;margin-bottom:6px">\u{1F389}</div>
+            <p><strong>No outstanding quotes.</strong></p>
+            <p style="font-size:13px;margin-top:4px">All quotes have been marked won or lost.</p>
+          </div>
+        ` : `
+          <table style="width:100%;border-collapse:collapse;font-size:13px">
+            <thead>
+              <tr style="background:#fafbfc;border-bottom:1px solid var(--border)">
+                <th style="padding:10px 16px;text-align:left;font-weight:600;color:var(--text-muted);font-size:11px;letter-spacing:0.5px">PROJECT</th>
+                <th style="padding:10px 16px;text-align:left;font-weight:600;color:var(--text-muted);font-size:11px;letter-spacing:0.5px">CUSTOMER</th>
+                <th style="padding:10px 16px;text-align:left;font-weight:600;color:var(--text-muted);font-size:11px;letter-spacing:0.5px">SAVED</th>
+                <th style="padding:10px 16px;text-align:right;font-weight:600;color:var(--text-muted);font-size:11px;letter-spacing:0.5px">AGE</th>
+                <th style="padding:10px 16px;text-align:right;font-weight:600;color:var(--text-muted);font-size:11px;letter-spacing:0.5px">VALUE</th>
+                <th style="padding:10px 16px;text-align:right;font-weight:600;color:var(--text-muted);font-size:11px;letter-spacing:0.5px">ACTIONS</th>
+              </tr>
+            </thead>
+            <tbody>
+              ${outstandingSorted.map(job => {
+                const i = state.savedJobs.indexOf(job);
+                const age = jobAgeDays(job);
+                const ageColor = age >= 30 ? 'var(--red)' : (age >= 14 ? 'var(--accent)' : 'var(--text-muted)');
+                let customer = job.customer;
+                if (typeof customer === 'string') { try { customer = JSON.parse(customer); } catch(e) { customer = null; } }
+                const customerName = customer && (customer.name || customer.site) ? esc(customer.name || customer.site) : '<span style="color:var(--text-muted)">—</span>';
+                const totalSell = typeof job.totalSellSnapshot === 'number' ? fmt(job.totalSellSnapshot) : '<span style="color:var(--text-muted)">—</span>';
+                return `
+                  <tr style="border-bottom:1px solid var(--border);cursor:pointer" onmouseover="this.style.background='#fafbfc'" onmouseout="this.style.background=''">
+                    <td style="padding:12px 16px;font-weight:600" onclick="loadSavedJob(${i})">${esc(job.projectName || 'Untitled')}</td>
+                    <td style="padding:12px 16px" onclick="loadSavedJob(${i})">${customerName}</td>
+                    <td style="padding:12px 16px;color:var(--text-muted)" onclick="loadSavedJob(${i})">${esc(job.savedDateDisplay || (job.savedDate||'').slice(0,10) || '')}</td>
+                    <td style="padding:12px 16px;text-align:right;color:${ageColor};font-weight:600">${age}d</td>
+                    <td style="padding:12px 16px;text-align:right;font-weight:600">${totalSell}</td>
+                    <td style="padding:12px 16px;text-align:right;white-space:nowrap">
+                      <button class="btn btn-sm" style="background:var(--green);color:white;padding:4px 10px;font-size:11px" onclick="setJobStatus(state.savedJobs[${i}], 'won')">Won</button>
+                      <button class="btn btn-sm" style="background:var(--red);color:white;padding:4px 10px;font-size:11px" onclick="setJobStatus(state.savedJobs[${i}], 'lost')">Lost</button>
+                      <button class="btn btn-outline btn-sm" style="padding:4px 10px;font-size:11px" onclick="loadSavedJob(${i})">Open</button>
+                    </td>
+                  </tr>
+                `;
+              }).join('')}
+            </tbody>
+          </table>
+        `}
+      </div>
+    </div>
+  `;
+}
+
+function renderFolderTreeNode(node, depth) {
+  const f = node.folder;
+  const expanded = state.expandedFolders.has(f.id);
+  const childCount = node.children.length;
+  const directJobs = state.savedJobs.filter(j => (j.folderId || null) === f.id && (state.jobsStatusFilter === 'all' || (j.status || 'outstanding') === state.jobsStatusFilter)).length;
+  const selected = state.currentFolderId === f.id;
+  let html = `
+    <div style="display:flex;align-items:center;gap:4px;padding:5px 8px 5px ${8 + depth*16}px;cursor:pointer;border-radius:4px;background:${selected ? 'var(--primary-light)' : 'transparent'};font-size:13px;font-weight:${selected?600:500}" onclick="state.currentFolderId='${f.id}';render()">
+      <span onclick="event.stopPropagation();toggleFolderExpanded('${f.id}')" style="width:14px;display:inline-block;text-align:center;color:var(--text-muted)">${childCount ? (expanded ? '▾' : '▸') : ''}</span>
+      <span style="flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">📁 ${esc(f.name)}</span>
+      <span style="font-size:11px;color:var(--text-muted)">${directJobs}</span>
+      <span onclick="event.stopPropagation();renameFolderPrompt('${f.id}')" style="opacity:0.5;padding:0 4px" title="Rename">&#9998;</span>
+      <span onclick="event.stopPropagation();deleteFolderPrompt('${f.id}')" style="opacity:0.5;padding:0 4px;color:var(--red)" title="Delete folder">&times;</span>
+    </div>
+  `;
+  if (expanded && childCount) {
+    html += node.children.map(c => renderFolderTreeNode(c, depth + 1)).join('');
+  }
+  return html;
+}
+
+function renameFolderPrompt(folderId) {
+  const f = state.folders.find(x => x.id === folderId);
+  if (!f) return;
+  const newName = prompt('Rename folder:', f.name);
+  if (newName && newName.trim() && newName.trim() !== f.name) renameFolder(folderId, newName.trim());
+}
+function deleteFolderPrompt(folderId) {
+  const f = state.folders.find(x => x.id === folderId);
+  if (!f) return;
+  const childCount = state.folders.filter(x => x.parentId === folderId).length;
+  const jobsHere = state.savedJobs.filter(j => j.folderId === folderId).length;
+  if (childCount || jobsHere) {
+    if (!confirm(`This folder contains ${childCount} sub-folder(s) and ${jobsHere} job(s).\n\nDelete just the folder? (jobs + sub-folders will become unfiled — no data is lost)`)) return;
+    // Re-parent children to root, unfile jobs
+    state.folders.filter(x => x.parentId === folderId).forEach(c => db.collection('folders').doc(c.id).update({ parentId: null }));
+    state.savedJobs.filter(j => j.folderId === folderId && j._fbId).forEach(j => db.collection('jobs').doc(j._fbId).update({ folderId: null }));
+  } else {
+    if (!confirm(`Delete folder "${f.name}"?`)) return;
+  }
+  deleteFolderDoc(folderId);
+  if (state.currentFolderId === folderId) state.currentFolderId = null;
+}
+function newFolderPrompt(parentId) {
+  const name = prompt(parentId ? 'New sub-folder name:' : 'New folder name:');
+  if (name && name.trim()) createFolder(name.trim(), parentId || null);
+}
+
+function renderJobs() {
+  const tree = buildFolderTree(null);
+  const cf = state.currentFolderId;
+  const filter = state.jobsStatusFilter || 'outstanding';
+  const search = (state.jobsSearch || '').toLowerCase();
+
+  // Decide which jobs to show
+  let visibleJobs;
+  if (cf === '__all__' || cf === null) {
+    // null = "all (any folder)" view
+    visibleJobs = state.savedJobs;
+  } else if (cf === '__unfiled__') {
+    visibleJobs = state.savedJobs.filter(j => !j.folderId);
+  } else {
+    visibleJobs = state.savedJobs.filter(j => j.folderId === cf);
+  }
+  if (filter !== 'all') visibleJobs = visibleJobs.filter(j => (j.status || 'outstanding') === filter);
+  if (search) visibleJobs = visibleJobs.filter(j => (j.projectName||'').toLowerCase().includes(search) || (j.customer && JSON.stringify(j.customer).toLowerCase().includes(search)));
+
+  const folderOptions = [`<option value="">— Unfiled —</option>`, ...state.folders.map(f => `<option value="${f.id}">${esc(folderPath(f.id))}</option>`)].join('');
+
+  return `
+    <div class="header">
+      <h1>Saved Jobs ${cf && cf !== '__all__' && cf !== '__unfiled__' ? `<span style="font-size:14px;font-weight:400;color:var(--text-muted)"> &middot; ${esc(folderPath(cf))}</span>` : ''}</h1>
+      <div class="header-actions">
+        <input type="text" placeholder="\u{1F50D} Search projects..." value="${esc(state.jobsSearch||'')}" oninput="state.jobsSearch=this.value;render()" style="width:200px;padding:8px 12px;border:1px solid var(--border);border-radius:5px;font-size:13px">
+        <select onchange="state.jobsStatusFilter=this.value;render()" style="padding:8px 10px;border:1px solid var(--border);border-radius:5px;font-size:13px">
+          <option value="all" ${filter==='all'?'selected':''}>All statuses</option>
+          <option value="outstanding" ${filter==='outstanding'?'selected':''}>Outstanding only</option>
+          <option value="won" ${filter==='won'?'selected':''}>Won only</option>
+          <option value="lost" ${filter==='lost'?'selected':''}>Lost only</option>
+        </select>
         <span style="font-size:12px;padding:4px 10px;border-radius:12px;font-weight:600;${fbReady ? 'color:var(--green);background:var(--green-light)' : 'color:var(--text-muted);background:#f0f0f0'}">${fbReady ? '&#9679; Cloud Synced' : '&#9679; Local Only'}</span>
         <button class="btn btn-success" onclick="quickSave()">${state.currentJobId ? '&#128190; Save' : '&#128190; Save New'}</button>
         <button class="btn btn-primary" onclick="saveCurrentJob()">Save As New</button>
@@ -3081,39 +3398,72 @@ function renderJobs() {
         <input type="file" id="jobFileInput" accept=".json" style="display:none" onchange="importJobFile(event)">
       </div>
     </div>
-    <div class="content">
-      ${state.savedJobs.length === 0 ? `
-        <div class="empty-state" style="background:var(--card);border-radius:8px;box-shadow:var(--shadow);padding:60px">
-          <p style="font-size:18px;margin-bottom:12px"><strong>No saved jobs yet</strong></p>
-          <p>Click <strong>Save Current Job</strong> to save your current schedule here, or import a previously saved project file.</p>
+    <div style="display:flex;flex:1;overflow:hidden">
+      <!-- Folder tree sidebar -->
+      <div style="width:240px;background:var(--card);border-right:1px solid var(--border);padding:14px 8px;overflow-y:auto;flex-shrink:0">
+        <div style="display:flex;justify-content:space-between;align-items:center;padding:0 8px 10px;border-bottom:1px solid var(--border);margin-bottom:8px">
+          <span style="font-size:12px;font-weight:700;color:var(--text-muted);letter-spacing:0.5px">FOLDERS</span>
+          <button class="btn btn-outline btn-sm" onclick="newFolderPrompt(null)" style="padding:3px 8px;font-size:11px" title="New folder">+ New</button>
         </div>
-      ` : `
-        <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(340px,1fr));gap:16px">
-          ${state.savedJobs.map((job, i) => {
-            const doorsArr = typeof job.doors === 'string' ? (function(){ try { return JSON.parse(job.doors); } catch(e) { return []; } })() : (Array.isArray(job.doors) ? job.doors : []);
-            const doorCount = doorsArr.length;
-            return `
-              <div style="background:var(--card);border-radius:8px;box-shadow:var(--shadow);padding:22px;border-left:4px solid var(--primary)">
-                <div style="display:flex;justify-content:space-between;align-items:start;margin-bottom:10px">
-                  <div>
-                    <h3 style="font-size:16px;margin-bottom:4px">${esc(job.projectName || 'Untitled')}</h3>
-                    <span style="font-size:12px;color:var(--text-muted)">${esc(job.savedDateDisplay || job.savedDate || '')}</span>
+        <div style="padding:5px 8px;cursor:pointer;border-radius:4px;background:${(cf===null||cf==='__all__')?'var(--primary-light)':'transparent'};font-size:13px;font-weight:${(cf===null||cf==='__all__')?600:500}" onclick="state.currentFolderId=null;render()">
+          📂 All jobs <span style="font-size:11px;color:var(--text-muted);float:right">${state.savedJobs.filter(j=>filter==='all'||(j.status||'outstanding')===filter).length}</span>
+        </div>
+        <div style="padding:5px 8px;cursor:pointer;border-radius:4px;background:${cf==='__unfiled__'?'var(--primary-light)':'transparent'};font-size:13px;font-weight:${cf==='__unfiled__'?600:500}" onclick="state.currentFolderId='__unfiled__';render()">
+          📄 Unfiled <span style="font-size:11px;color:var(--text-muted);float:right">${state.savedJobs.filter(j=>!j.folderId&&(filter==='all'||(j.status||'outstanding')===filter)).length}</span>
+        </div>
+        <div style="border-top:1px solid var(--border);margin:8px 0"></div>
+        ${tree.length ? tree.map(n => renderFolderTreeNode(n, 0)).join('') : '<div style="padding:14px 8px;font-size:12px;color:var(--text-muted);text-align:center">No folders yet. Click <strong>+ New</strong> above.</div>'}
+        ${cf && cf !== '__all__' && cf !== '__unfiled__' ? `<div style="border-top:1px solid var(--border);margin-top:10px;padding-top:10px"><button class="btn btn-outline btn-sm" onclick="newFolderPrompt('${cf}')" style="width:100%;font-size:11px">+ Sub-folder here</button></div>` : ''}
+      </div>
+      <!-- Jobs grid -->
+      <div class="content" style="flex:1;overflow:auto">
+        ${visibleJobs.length === 0 ? `
+          <div class="empty-state" style="background:var(--card);border-radius:8px;box-shadow:var(--shadow);padding:60px;text-align:center">
+            <p style="font-size:18px;margin-bottom:12px"><strong>No jobs match this view</strong></p>
+            <p style="color:var(--text-muted)">${state.savedJobs.length === 0 ? 'Save your current schedule to get started.' : 'Try changing the folder, status filter, or search.'}</p>
+          </div>
+        ` : `
+          <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(340px,1fr));gap:16px">
+            ${visibleJobs.map((job) => {
+              const i = state.savedJobs.indexOf(job);
+              const doorsArr = typeof job.doors === 'string' ? (function(){ try { return JSON.parse(job.doors); } catch(e) { return []; } })() : (Array.isArray(job.doors) ? job.doors : []);
+              const doorCount = doorsArr.length;
+              const totalDoors = doorsArr.reduce((s,d) => s + (parseInt(d&&d.qty,10) >= 1 ? parseInt(d.qty,10) : 1), 0);
+              const status = job.status || 'outstanding';
+              const meta = STATUS_META[status] || STATUS_META.outstanding;
+              const totalSell = typeof job.totalSellSnapshot === 'number' ? job.totalSellSnapshot : null;
+              return `
+                <div style="background:var(--card);border-radius:8px;box-shadow:var(--shadow);padding:18px 20px;border-left:4px solid ${meta.color}">
+                  <div style="display:flex;justify-content:space-between;align-items:start;margin-bottom:10px;gap:8px">
+                    <div style="min-width:0;flex:1">
+                      <h3 style="font-size:15px;margin-bottom:3px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${esc(job.projectName||'')}">${esc(job.projectName || 'Untitled')}</h3>
+                      <span style="font-size:11px;color:var(--text-muted)">${esc(job.savedDateDisplay || job.savedDate || '')}</span>
+                    </div>
+                    ${statusBadge(status)}
                   </div>
-                  <span style="font-size:12px;font-weight:600;color:var(--primary);background:var(--primary-light);padding:3px 10px;border-radius:12px">${doorCount} door${doorCount!==1?'s':''} ${fbReady&&job._fbId ? '&#9729;' : ''}</span>
+                  <div style="font-size:12px;color:var(--text-muted);margin-bottom:8px">
+                    ${doorCount} row${doorCount!==1?'s':''} &middot; ${totalDoors} door${totalDoors!==1?'s':''} ${totalSell!==null ? '&middot; '+fmt(totalSell) : ''}
+                  </div>
+                  ${job.folderId ? `<div style="font-size:11px;color:var(--text-muted);margin-bottom:10px">📁 ${esc(folderPath(job.folderId))}</div>` : ''}
+                  <div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:8px">
+                    <button class="btn btn-primary btn-sm" onclick="loadSavedJob(${i})">Open</button>
+                    ${status !== 'won'  ? `<button class="btn btn-sm" style="background:var(--green);color:white" onclick="setJobStatus(state.savedJobs[${i}], 'won')">Mark Won</button>` : ''}
+                    ${status !== 'lost' ? `<button class="btn btn-sm" style="background:var(--red);color:white"   onclick="setJobStatus(state.savedJobs[${i}], 'lost')">Mark Lost</button>` : ''}
+                    ${status !== 'outstanding' ? `<button class="btn btn-outline btn-sm" onclick="setJobStatus(state.savedJobs[${i}], 'outstanding')">Re-open</button>` : ''}
+                  </div>
+                  <div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap">
+                    <select onchange="setJobFolder(state.savedJobs[${i}], this.value)" style="padding:5px 8px;border:1px solid var(--border);border-radius:4px;font-size:11px;flex:1;min-width:120px">
+                      ${[`<option value="">— Unfiled —</option>`, ...state.folders.map(f => `<option value="${f.id}" ${job.folderId===f.id?'selected':''}>${esc(folderPath(f.id))}</option>`)].join('')}
+                    </select>
+                    <button class="btn btn-outline btn-sm" onclick="exportSavedJob(${i})" title="Download">⬇</button>
+                    <button class="btn btn-danger btn-sm" onclick="deleteSavedJob(${i})" title="Delete">✖</button>
+                  </div>
                 </div>
-                <div style="font-size:13px;color:var(--text-muted);margin-bottom:14px">
-                  ${doorCount} door${doorCount!==1?'s':''} &middot; Markup: ${((parseFloat(job.markup)||0.22)*100).toFixed(0)}%
-                </div>
-                <div style="display:flex;gap:8px">
-                  <button class="btn btn-primary btn-sm" onclick="loadSavedJob(${i})">Open</button>
-                  <button class="btn btn-outline btn-sm" onclick="exportSavedJob(${i})">Download</button>
-                  <button class="btn btn-danger btn-sm" onclick="deleteSavedJob(${i})">Delete</button>
-                </div>
-              </div>
-            `;
-          }).join('')}
-        </div>
-      `}
+              `;
+            }).join('')}
+          </div>
+        `}
+      </div>
     </div>
   `;
 }
@@ -3125,6 +3475,16 @@ function calcSellPriceForJob(door, job) {
 }
 
 function buildJobData() {
+  // v20: preserve existing status/folder when re-saving, default to outstanding/null on first save
+  let existingStatus = 'outstanding', existingFolderId = null, existingStatusChangedAt = null;
+  if (state.currentJobId) {
+    const existing = state.savedJobs.find(j => (j._fbId || j._localId) === state.currentJobId);
+    if (existing) {
+      existingStatus = existing.status || 'outstanding';
+      existingFolderId = existing.folderId || null;
+      existingStatusChangedAt = existing.statusChangedAt || null;
+    }
+  }
   return {
     projectName: state.projectName,
     markup: state.markup,
@@ -3136,6 +3496,12 @@ function buildJobData() {
     savedDateDisplay: new Date().toLocaleString('en-GB'),
     customCategories: HW_CATEGORIES.filter(c => !BUILTIN_HW_KEYS.includes(c.key)),
     customer: JSON.parse(JSON.stringify(state.customer)),
+    // v20 — quote workflow + folder placement
+    status: existingStatus,
+    statusChangedAt: existingStatusChangedAt,
+    folderId: existingFolderId,
+    // v20 — cached row total for dashboard sorting/totals (server can't run our calc engine)
+    totalSellSnapshot: state.doors.reduce((s,d) => s + calcSellPrice(d), 0),
   };
 }
 
