@@ -584,6 +584,7 @@ function initFirestore() {
     // Listen for real-time changes to shared jobs
     db.collection('jobs').onSnapshot(snap => {
       if (_skipFireSync) return;
+      _invalidateJobTotalCache(); // v21: a job changed somewhere, recompute totals next render
       state.savedJobs = [];
       snap.forEach(doc => {
         const d = doc.data();
@@ -3221,22 +3222,61 @@ function loadProject(event) {
 // SAVED JOBS PAGE
 // ════════════════════════════════════════════
 function renderDashboard() {
-  const outstanding = state.savedJobs.filter(j => (j.status||'outstanding') === 'outstanding');
-  const won = state.savedJobs.filter(j => j.status === 'won');
-  const lost = state.savedJobs.filter(j => j.status === 'lost');
-  const outstandingTotal = outstanding.reduce((s,j) => s + (typeof j.totalSellSnapshot === 'number' ? j.totalSellSnapshot : 0), 0);
-  const wonTotal = won.reduce((s,j) => s + (typeof j.totalSellSnapshot === 'number' ? j.totalSellSnapshot : 0), 0);
-  // Sort outstanding by oldest first (longest waiting at top)
-  const outstandingSorted = [...outstanding].sort((a,b) => (a.savedDate||'').localeCompare(b.savedDate||''));
-  const followUps = outstandingSorted.filter(j => jobAgeDays(j) >= 30);
+  // ── data prep ───────────────────────────────────────────────────────
+  const now = Date.now();
+  const yearStart = new Date(new Date().getFullYear(), 0, 1).getTime();
 
-  const card = (label, value, color, sub) => `
-    <div style="background:var(--card);border-radius:8px;box-shadow:var(--shadow);padding:18px 22px;border-left:4px solid ${color};flex:1;min-width:200px">
-      <div style="font-size:11px;font-weight:700;color:var(--text-muted);letter-spacing:0.5px;margin-bottom:6px">${label}</div>
-      <div style="font-size:26px;font-weight:700;color:${color}">${value}</div>
-      ${sub ? `<div style="font-size:12px;color:var(--text-muted);margin-top:4px">${sub}</div>` : ''}
-    </div>
-  `;
+  const outstanding = state.savedJobs.filter(j => (j.status||'outstanding') === 'outstanding');
+  const won  = state.savedJobs.filter(j => j.status === 'won');
+  const lost = state.savedJobs.filter(j => j.status === 'lost');
+
+  const wonThisYear  = won .filter(j => (new Date(j.statusChangedAt || j.savedDate).getTime()) >= yearStart);
+  const lostThisYear = lost.filter(j => (new Date(j.statusChangedAt || j.savedDate).getTime()) >= yearStart);
+
+  const pipelineValue   = outstanding.reduce((s,j) => s + computeJobTotalSell(j), 0);
+  const wonValueYTD     = wonThisYear .reduce((s,j) => s + computeJobTotalSell(j), 0);
+  const lostValueYTD    = lostThisYear.reduce((s,j) => s + computeJobTotalSell(j), 0);
+  const avgQuoteValue   = state.savedJobs.length ? state.savedJobs.reduce((s,j) => s + computeJobTotalSell(j), 0) / state.savedJobs.length : 0;
+  const decidedThisYear = wonThisYear.length + lostThisYear.length;
+  const winRate         = decidedThisYear ? Math.round(wonThisYear.length / decidedThisYear * 100) : null;
+
+  // Sort outstanding by oldest first
+  const outstandingSorted = [...outstanding].sort((a,b) => (a.savedDate||'').localeCompare(b.savedDate||''));
+  const followUps        = outstandingSorted.filter(j => jobAgeDays(j) >= 30);
+
+  // Recent wins (top 5 by statusChangedAt desc, falling back to savedDate)
+  const recentWins = [...won]
+    .sort((a,b) => new Date(b.statusChangedAt || b.savedDate) - new Date(a.statusChangedAt || a.savedDate))
+    .slice(0, 5);
+
+  // Pipeline by age buckets (£ value)
+  const buckets = [
+    { label: '0–14 days',  color: 'var(--green)',  total: 0, count: 0 },
+    { label: '15–30 days', color: 'var(--primary)',total: 0, count: 0 },
+    { label: '31–60 days', color: 'var(--accent)', total: 0, count: 0 },
+    { label: '60+ days',   color: 'var(--red)',    total: 0, count: 0 },
+  ];
+  outstanding.forEach(j => {
+    const d = jobAgeDays(j);
+    const v = computeJobTotalSell(j);
+    let b = 0;
+    if (d > 14 && d <= 30) b = 1;
+    else if (d > 30 && d <= 60) b = 2;
+    else if (d > 60) b = 3;
+    buckets[b].total += v;
+    buckets[b].count++;
+  });
+  const maxBucket = Math.max(1, ...buckets.map(b => b.total));
+
+  // ── card helper ─────────────────────────────────────────────────────
+  const kpiCard = (opts) => `
+    <div style="background:${opts.bg};color:${opts.fg};border-radius:12px;padding:22px 24px;flex:1;min-width:220px;position:relative;overflow:hidden;box-shadow:0 4px 14px rgba(0,0,0,0.08)">
+      <div style="position:absolute;top:14px;right:18px;font-size:34px;opacity:0.22;line-height:1">${opts.icon}</div>
+      <div style="font-size:11px;font-weight:700;letter-spacing:1px;opacity:0.85;text-transform:uppercase;margin-bottom:8px">${opts.label}</div>
+      <div style="font-size:32px;font-weight:800;line-height:1.05;margin-bottom:6px">${opts.value}</div>
+      ${opts.sub ? `<div style="font-size:13px;opacity:0.85;font-weight:500">${opts.sub}</div>` : ''}
+      ${opts.foot ? `<div style="margin-top:14px;padding-top:10px;border-top:1px solid rgba(255,255,255,0.18);font-size:12px;opacity:0.85">${opts.foot}</div>` : ''}
+    </div>`;
 
   return `
     <div class="header">
@@ -3246,59 +3286,151 @@ function renderDashboard() {
         <button class="btn btn-success" onclick="newProject()">+ New Quote</button>
       </div>
     </div>
-    <div class="content">
-      <!-- KPI cards -->
-      <div style="display:flex;gap:14px;flex-wrap:wrap;margin-bottom:20px">
-        ${card('OUTSTANDING QUOTES', outstanding.length, 'var(--accent)', outstandingTotal ? `Estimated value: ${fmt(outstandingTotal)}` : 'No snapshot value yet')}
-        ${card('WON THIS YEAR', won.length, 'var(--green)', wonTotal ? `Value: ${fmt(wonTotal)}` : '')}
-        ${card('LOST', lost.length, 'var(--red)', '')}
-        ${card('FOLLOW-UP NEEDED', followUps.length, 'var(--purple)', '30+ days outstanding')}
+    <div class="content" style="background:#F5F6FA">
+
+      <!-- HERO KPI ROW ─────────────────────────────────────────────── -->
+      <div style="display:flex;gap:16px;flex-wrap:wrap;margin-bottom:22px">
+        ${kpiCard({
+          label:'PIPELINE VALUE', icon:'£',
+          value:fmt(pipelineValue),
+          sub:`${outstanding.length} outstanding quote${outstanding.length===1?'':'s'}`,
+          foot: followUps.length ? `<strong>${followUps.length}</strong> overdue (30+ days) &middot; needs follow-up` : 'No follow-ups overdue',
+          bg:'linear-gradient(135deg, #2F5496 0%, #1a3060 100%)', fg:'white'
+        })}
+        ${kpiCard({
+          label:'WON THIS YEAR', icon:'✔',
+          value:fmt(wonValueYTD),
+          sub:`${wonThisYear.length} quote${wonThisYear.length===1?'':'s'} won`,
+          foot:'Total ' + (won.length>wonThisYear.length ? `${won.length} all-time &middot; ${fmt(won.reduce((s,j)=>s+computeJobTotalSell(j),0))}` : 'all-time'),
+          bg:'linear-gradient(135deg, #548235 0%, #3d6326 100%)', fg:'white'
+        })}
+        ${kpiCard({
+          label:'WIN RATE', icon:'◎',
+          value: winRate === null ? '—' : (winRate + '%'),
+          sub: winRate === null ? 'No decided quotes this year' : `${wonThisYear.length} won / ${lostThisYear.length} lost`,
+          foot: decidedThisYear ? `${decidedThisYear} decisions made this year` : 'Mark quotes Won/Lost to track',
+          bg:'linear-gradient(135deg, #BF8F00 0%, #8a6800 100%)', fg:'white'
+        })}
+        ${kpiCard({
+          label:'AVG QUOTE', icon:'≡',
+          value:fmt(avgQuoteValue),
+          sub:`Across ${state.savedJobs.length} saved quote${state.savedJobs.length===1?'':'s'}`,
+          foot: lostValueYTD ? `Lost YTD: ${fmt(lostValueYTD)}` : '',
+          bg:'linear-gradient(135deg, #7030A0 0%, #4f2272 100%)', fg:'white'
+        })}
       </div>
 
-      <!-- Outstanding list -->
-      <div style="background:var(--card);border-radius:8px;box-shadow:var(--shadow);overflow:hidden">
-        <div style="padding:14px 20px;border-bottom:1px solid var(--border);display:flex;justify-content:space-between;align-items:center">
-          <h2 style="font-size:16px">Outstanding quotes <span style="color:var(--text-muted);font-weight:400;font-size:13px">(oldest first)</span></h2>
+      <!-- PIPELINE-BY-AGE + RECENT WINS ─────────────────────────────── -->
+      <div style="display:grid;grid-template-columns:1.6fr 1fr;gap:16px;margin-bottom:22px">
+
+        <!-- Pipeline by age bar chart -->
+        <div style="background:var(--card);border-radius:10px;box-shadow:var(--shadow);padding:20px 24px">
+          <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:18px">
+            <h2 style="font-size:15px;font-weight:700">Pipeline by age</h2>
+            <span style="font-size:11px;color:var(--text-muted)">£ value of outstanding quotes</span>
+          </div>
+          ${outstanding.length === 0 ? `
+            <div style="padding:30px 20px;text-align:center;color:var(--text-muted);font-size:13px">No outstanding quotes to chart.</div>
+          ` : `
+            <div style="display:flex;flex-direction:column;gap:14px">
+              ${buckets.map(b => {
+                const pct = Math.round((b.total / maxBucket) * 100);
+                return `
+                  <div>
+                    <div style="display:flex;justify-content:space-between;margin-bottom:5px;font-size:12px">
+                      <span style="font-weight:600;color:var(--text)">${b.label} <span style="color:var(--text-muted);font-weight:400">(${b.count})</span></span>
+                      <span style="font-weight:700;color:${b.color}">${fmt(b.total)}</span>
+                    </div>
+                    <div style="background:#F0F2F5;border-radius:6px;height:10px;overflow:hidden">
+                      <div style="width:${pct}%;height:100%;background:${b.color};border-radius:6px;transition:width 0.4s"></div>
+                    </div>
+                  </div>
+                `;
+              }).join('')}
+            </div>
+          `}
+        </div>
+
+        <!-- Recent wins -->
+        <div style="background:var(--card);border-radius:10px;box-shadow:var(--shadow);padding:20px 24px">
+          <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px">
+            <h2 style="font-size:15px;font-weight:700">Recent wins</h2>
+            <span style="color:var(--green);font-size:18px">✔</span>
+          </div>
+          ${recentWins.length === 0 ? `
+            <div style="padding:30px 20px;text-align:center;color:var(--text-muted);font-size:13px">No wins yet. Click <strong>Mark Won</strong> on a quote when it converts.</div>
+          ` : `
+            <div style="display:flex;flex-direction:column">
+              ${recentWins.map(j => {
+                const i = state.savedJobs.indexOf(j);
+                const date = (j.statusChangedAt || j.savedDate || '').slice(0, 10);
+                const value = computeJobTotalSell(j);
+                return `
+                  <div style="display:flex;justify-content:space-between;align-items:center;padding:11px 0;border-bottom:1px solid var(--border);cursor:pointer" onclick="loadSavedJob(${i})">
+                    <div style="min-width:0;flex:1;padding-right:10px">
+                      <div style="font-size:13px;font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${esc(j.projectName||'')}">${esc(j.projectName||'Untitled')}</div>
+                      <div style="font-size:11px;color:var(--text-muted);margin-top:2px">${date}</div>
+                    </div>
+                    <div style="font-size:14px;font-weight:700;color:var(--green);text-align:right;white-space:nowrap">${value ? fmt(value) : '—'}</div>
+                  </div>
+                `;
+              }).join('')}
+            </div>
+          `}
+        </div>
+      </div>
+
+      <!-- OUTSTANDING QUOTES TABLE ──────────────────────────────────── -->
+      <div style="background:var(--card);border-radius:10px;box-shadow:var(--shadow);overflow:hidden">
+        <div style="padding:18px 24px;border-bottom:1px solid var(--border);display:flex;justify-content:space-between;align-items:center;gap:14px">
+          <div>
+            <h2 style="font-size:15px;font-weight:700">Outstanding quotes</h2>
+            <div style="font-size:12px;color:var(--text-muted);margin-top:3px">Sorted oldest-first &middot; ${outstandingSorted.length} quote${outstandingSorted.length===1?'':'s'} &middot; ${fmt(pipelineValue)} total</div>
+          </div>
           <button class="btn btn-outline btn-sm" onclick="nav('jobs')">All saved jobs &rarr;</button>
         </div>
         ${outstandingSorted.length === 0 ? `
-          <div style="padding:40px;text-align:center;color:var(--text-muted)">
-            <div style="font-size:36px;margin-bottom:6px">\u{1F389}</div>
-            <p><strong>No outstanding quotes.</strong></p>
-            <p style="font-size:13px;margin-top:4px">All quotes have been marked won or lost.</p>
+          <div style="padding:48px;text-align:center;color:var(--text-muted)">
+            <div style="font-size:42px;margin-bottom:8px">\u{1F389}</div>
+            <p style="font-size:15px;font-weight:600;color:var(--text)">No outstanding quotes</p>
+            <p style="font-size:13px;margin-top:4px">Every quote has been marked won or lost. Nicely done.</p>
           </div>
         ` : `
           <table style="width:100%;border-collapse:collapse;font-size:13px">
             <thead>
               <tr style="background:#fafbfc;border-bottom:1px solid var(--border)">
-                <th style="padding:10px 16px;text-align:left;font-weight:600;color:var(--text-muted);font-size:11px;letter-spacing:0.5px">PROJECT</th>
-                <th style="padding:10px 16px;text-align:left;font-weight:600;color:var(--text-muted);font-size:11px;letter-spacing:0.5px">CUSTOMER</th>
-                <th style="padding:10px 16px;text-align:left;font-weight:600;color:var(--text-muted);font-size:11px;letter-spacing:0.5px">SAVED</th>
-                <th style="padding:10px 16px;text-align:right;font-weight:600;color:var(--text-muted);font-size:11px;letter-spacing:0.5px">AGE</th>
-                <th style="padding:10px 16px;text-align:right;font-weight:600;color:var(--text-muted);font-size:11px;letter-spacing:0.5px">VALUE</th>
-                <th style="padding:10px 16px;text-align:right;font-weight:600;color:var(--text-muted);font-size:11px;letter-spacing:0.5px">ACTIONS</th>
+                <th style="padding:12px 20px;text-align:left;font-weight:700;color:var(--text-muted);font-size:11px;letter-spacing:1px">PROJECT</th>
+                <th style="padding:12px 20px;text-align:left;font-weight:700;color:var(--text-muted);font-size:11px;letter-spacing:1px">CUSTOMER</th>
+                <th style="padding:12px 20px;text-align:left;font-weight:700;color:var(--text-muted);font-size:11px;letter-spacing:1px">SAVED</th>
+                <th style="padding:12px 20px;text-align:center;font-weight:700;color:var(--text-muted);font-size:11px;letter-spacing:1px">AGE</th>
+                <th style="padding:12px 20px;text-align:right;font-weight:700;color:var(--text-muted);font-size:11px;letter-spacing:1px">VALUE</th>
+                <th style="padding:12px 20px;text-align:right;font-weight:700;color:var(--text-muted);font-size:11px;letter-spacing:1px">ACTIONS</th>
               </tr>
             </thead>
             <tbody>
               ${outstandingSorted.map(job => {
                 const i = state.savedJobs.indexOf(job);
                 const age = jobAgeDays(job);
-                const ageColor = age >= 30 ? 'var(--red)' : (age >= 14 ? 'var(--accent)' : 'var(--text-muted)');
+                let ageBg, ageColor;
+                if (age >= 60) { ageBg = 'var(--red-light)'; ageColor = 'var(--red)'; }
+                else if (age >= 30) { ageBg = '#FFE9CC'; ageColor = 'var(--accent)'; }
+                else if (age >= 14) { ageBg = 'var(--primary-light)'; ageColor = 'var(--primary)'; }
+                else { ageBg = 'var(--green-light)'; ageColor = 'var(--green)'; }
                 let customer = job.customer;
                 if (typeof customer === 'string') { try { customer = JSON.parse(customer); } catch(e) { customer = null; } }
                 const customerName = customer && (customer.name || customer.site) ? esc(customer.name || customer.site) : '<span style="color:var(--text-muted)">—</span>';
-                const totalSell = typeof job.totalSellSnapshot === 'number' ? fmt(job.totalSellSnapshot) : '<span style="color:var(--text-muted)">—</span>';
+                const value = computeJobTotalSell(job);
                 return `
-                  <tr style="border-bottom:1px solid var(--border);cursor:pointer" onmouseover="this.style.background='#fafbfc'" onmouseout="this.style.background=''">
-                    <td style="padding:12px 16px;font-weight:600" onclick="loadSavedJob(${i})">${esc(job.projectName || 'Untitled')}</td>
-                    <td style="padding:12px 16px" onclick="loadSavedJob(${i})">${customerName}</td>
-                    <td style="padding:12px 16px;color:var(--text-muted)" onclick="loadSavedJob(${i})">${esc(job.savedDateDisplay || (job.savedDate||'').slice(0,10) || '')}</td>
-                    <td style="padding:12px 16px;text-align:right;color:${ageColor};font-weight:600">${age}d</td>
-                    <td style="padding:12px 16px;text-align:right;font-weight:600">${totalSell}</td>
-                    <td style="padding:12px 16px;text-align:right;white-space:nowrap">
-                      <button class="btn btn-sm" style="background:var(--green);color:white;padding:4px 10px;font-size:11px" onclick="setJobStatus(state.savedJobs[${i}], 'won')">Won</button>
-                      <button class="btn btn-sm" style="background:var(--red);color:white;padding:4px 10px;font-size:11px" onclick="setJobStatus(state.savedJobs[${i}], 'lost')">Lost</button>
-                      <button class="btn btn-outline btn-sm" style="padding:4px 10px;font-size:11px" onclick="loadSavedJob(${i})">Open</button>
+                  <tr style="border-bottom:1px solid var(--border);cursor:pointer;transition:background 0.1s" onmouseover="this.style.background='#fafbfc'" onmouseout="this.style.background=''">
+                    <td style="padding:14px 20px;font-weight:600;color:var(--text)" onclick="loadSavedJob(${i})">${esc(job.projectName || 'Untitled')}</td>
+                    <td style="padding:14px 20px" onclick="loadSavedJob(${i})">${customerName}</td>
+                    <td style="padding:14px 20px;color:var(--text-muted)" onclick="loadSavedJob(${i})">${esc(job.savedDateDisplay || (job.savedDate||'').slice(0,10) || '')}</td>
+                    <td style="padding:14px 20px;text-align:center"><span style="display:inline-block;background:${ageBg};color:${ageColor};padding:3px 10px;border-radius:12px;font-size:11px;font-weight:700">${age}d</span></td>
+                    <td style="padding:14px 20px;text-align:right;font-weight:700;font-size:14px;color:var(--text)">${value ? fmt(value) : '<span style="color:var(--text-muted);font-weight:400">—</span>'}</td>
+                    <td style="padding:10px 20px;text-align:right;white-space:nowrap">
+                      <button class="btn btn-sm" style="background:var(--green);color:white;padding:5px 12px;font-size:11px;border-radius:4px" onclick="event.stopPropagation();setJobStatus(state.savedJobs[${i}], 'won')">Won</button>
+                      <button class="btn btn-sm" style="background:var(--red);color:white;padding:5px 12px;font-size:11px;border-radius:4px" onclick="event.stopPropagation();setJobStatus(state.savedJobs[${i}], 'lost')">Lost</button>
+                      <button class="btn btn-outline btn-sm" style="padding:5px 12px;font-size:11px;border-radius:4px" onclick="event.stopPropagation();loadSavedJob(${i})">Open</button>
                     </td>
                   </tr>
                 `;
@@ -3307,6 +3439,7 @@ function renderDashboard() {
           </table>
         `}
       </div>
+
     </div>
   `;
 }
@@ -3468,10 +3601,54 @@ function renderJobs() {
   `;
 }
 
-// Simplified sell price calculation for job cards (uses the job's own rates)
+// v21: live job total computation — supports OLD jobs that have no totalSellSnapshot.
+// Uses the job's own saved rates + markup by temporarily swapping state.rates/state.markup,
+// running the existing calc engine, then restoring. Cached per job so it only runs once per session.
+const _jobTotalCache = new Map();
+function _invalidateJobTotalCache() { _jobTotalCache.clear(); }
+
+function computeJobTotalSell(job) {
+  if (!job) return 0;
+  if (typeof job.totalSellSnapshot === 'number' && job.totalSellSnapshot > 0) return job.totalSellSnapshot;
+  const cacheKey = job._fbId || job._localId || job.savedDate || (job.projectName + ':' + (job.savedDate||''));
+  if (_jobTotalCache.has(cacheKey)) return _jobTotalCache.get(cacheKey);
+
+  let doors = job.doors;
+  if (typeof doors === 'string') { try { doors = JSON.parse(doors); } catch(e) { doors = null; } }
+  if (!Array.isArray(doors) || !doors.length) { _jobTotalCache.set(cacheKey, 0); return 0; }
+  let rates = job.rates;
+  if (typeof rates === 'string') { try { rates = JSON.parse(rates); } catch(e) { rates = null; } }
+  if (!rates) { _jobTotalCache.set(cacheKey, 0); return 0; }
+
+  const savedRates = state.rates;
+  const savedMarkup = state.markup;
+  let total = 0;
+  try {
+    state.rates = rates;
+    state.markup = parseFloat(job.markup);
+    if (isNaN(state.markup)) state.markup = 0.22;
+    total = doors.reduce((s,d) => s + (calcSellPrice(d) || 0), 0);
+  } catch(e) {
+    total = 0;
+  } finally {
+    state.rates = savedRates;
+    state.markup = savedMarkup;
+  }
+  _jobTotalCache.set(cacheKey, total);
+  return total;
+}
+
+// Kept for backwards compatibility with any older callers
 function calcSellPriceForJob(door, job) {
-  // simplified - just return 0 for display, the real calc happens when loaded
-  return 0;
+  let rates = job && job.rates;
+  if (typeof rates === 'string') { try { rates = JSON.parse(rates); } catch(e) { return 0; } }
+  if (!rates) return 0;
+  const sr = state.rates, sm = state.markup;
+  try {
+    state.rates = rates;
+    state.markup = parseFloat(job.markup) || 0.22;
+    return calcSellPrice(door) || 0;
+  } finally { state.rates = sr; state.markup = sm; }
 }
 
 function buildJobData() {
