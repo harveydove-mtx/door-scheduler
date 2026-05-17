@@ -835,7 +835,7 @@ let state = {
   folders: [], // [{id, name, parentId, createdAt}]
   expandedFolders: new Set(JSON.parse(localStorage.getItem('matrix_expanded_folders') || '[]')),
   currentFolderId: null, // which folder is selected in the Jobs page sidebar; null = root (all)
-  jobsStatusFilter: 'outstanding', // 'all' | 'outstanding' | 'won' | 'lost'
+  jobsStatusFilter: 'all', // v22: default shows ALL statuses so won/lost are visible; user can narrow with the dropdown
   jobsSearch: '',
   rates: JSON.parse(JSON.stringify(DEFAULT_RATES)),
   doors: [],
