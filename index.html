@@ -701,8 +701,52 @@ function deleteFolderDoc(folderId) {
   if (!fbReady) return Promise.resolve();
   return db.collection('folders').doc(folderId).delete();
 }
+
+// v24: ignore all filters and show every job in Firestore, with location info.
+function showLostJobs() {
+  const rows = [...state.savedJobs].sort((a,b) => (b.savedDate||'').localeCompare(a.savedDate||'')).map(job => {
+    const i = state.savedJobs.indexOf(job);
+    const status = job.status || 'outstanding';
+    const folderName = job.folderId ? esc(folderPath(job.folderId)) : '<em style="color:var(--text-muted)">Unfiled</em>';
+    return `<tr style="border-bottom:1px solid var(--border)">
+      <td style="padding:8px 12px;font-weight:600">${esc(job.projectName||'Untitled')}</td>
+      <td style="padding:8px 12px;color:var(--text-muted)">${esc(job.savedDateDisplay || (job.savedDate||'').slice(0,10) || '')}</td>
+      <td style="padding:8px 12px">${statusBadge(status)}</td>
+      <td style="padding:8px 12px;color:var(--text-muted)">${folderName}</td>
+      <td style="padding:6px 12px;text-align:right">
+        <button class="btn btn-primary btn-sm" style="padding:4px 10px;font-size:11px" onclick="state.modal=null;loadSavedJob(${i})">Open</button>
+      </td>
+    </tr>`;
+  }).join('');
+  const content = `
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px">
+      <h2 style="font-size:18px">All saved jobs in database</h2>
+      <span style="font-size:12px;color:var(--text-muted)">${state.savedJobs.length} total &middot; ignoring all filters</span>
+    </div>
+    <p style="font-size:12px;color:var(--text-muted);margin-bottom:14px">If a job you expected is NOT here, it's been deleted from Firestore. If it IS here but missing on the normal Saved Jobs page, check its Status (filter may hide it) or Folder (might be in a sub-folder).</p>
+    <div style="max-height:60vh;overflow:auto;border:1px solid var(--border);border-radius:6px">
+      <table style="width:100%;border-collapse:collapse;font-size:12px">
+        <thead style="position:sticky;top:0;background:#fafbfc">
+          <tr style="border-bottom:1px solid var(--border)">
+            <th style="padding:8px 12px;text-align:left;font-weight:700;color:var(--text-muted)">PROJECT</th>
+            <th style="padding:8px 12px;text-align:left;font-weight:700;color:var(--text-muted)">SAVED</th>
+            <th style="padding:8px 12px;text-align:left;font-weight:700;color:var(--text-muted)">STATUS</th>
+            <th style="padding:8px 12px;text-align:left;font-weight:700;color:var(--text-muted)">FOLDER</th>
+            <th style="padding:8px 12px;text-align:right;font-weight:700;color:var(--text-muted)">ACTION</th>
+          </tr>
+        </thead>
+        <tbody>${rows || '<tr><td colspan="5" style="padding:20px;text-align:center;color:var(--text-muted)">No saved jobs yet.</td></tr>'}</tbody>
+      </table>
+    </div>
+    <div style="display:flex;justify-content:flex-end;margin-top:14px">
+      <button class="btn btn-outline" onclick="state.modal=null;render()">Close</button>
+    </div>
+  `;
+  state.modal = { type: 'lostJobs', content: content };
+  render();
+}
 function setJobStatus(job, newStatus) {
-  if (!['outstanding','won','lost'].includes(newStatus)) return Promise.resolve();
+  if (!['outstanding','won','lost','redundant'].includes(newStatus)) return Promise.resolve();
   const patch = { status: newStatus, statusChangedAt: new Date().toISOString() };
   if (fbReady && job._fbId) return db.collection('jobs').doc(job._fbId).update(patch);
   // local-only fallback
@@ -736,6 +780,19 @@ function folderJobCount(folderId, statusFilter) {
   gather(folderId);
   return state.savedJobs.filter(j => directIds.has(j.folderId || null) && (!statusFilter || statusFilter === 'all' || j.status === statusFilter)).length;
 }
+// v24: returns a Set containing folderId AND every descendant folderId.
+// Used by renderJobs to show all jobs in a folder + any sub-folder, recursively.
+function getFolderDescendantIds(folderId) {
+  const ids = new Set();
+  if (!folderId) return ids;
+  function gather(parentId) {
+    ids.add(parentId);
+    state.folders.filter(f => (f.parentId || null) === parentId).forEach(f => gather(f.id));
+  }
+  gather(folderId);
+  return ids;
+}
+
 // Get folder display path e.g. "Pinnacle / 2026 / Phase 2"
 function folderPath(folderId) {
   const parts = [];
@@ -753,11 +810,14 @@ function toggleFolderExpanded(folderId) {
   localStorage.setItem('matrix_expanded_folders', JSON.stringify([...state.expandedFolders]));
   render();
 }
-// Status meta — colours + labels
+// Status meta — colours + labels.
+// v24: 'redundant' is a 4th status. Redundant jobs are excluded from dashboard
+// KPI totals AND win-rate calculations.
 const STATUS_META = {
-  outstanding: { label: 'Outstanding', color: 'var(--accent)', bg: 'var(--accent-light)', emoji: '\u23F3' },
-  won:         { label: 'Won',         color: 'var(--green)',  bg: 'var(--green-light)',  emoji: '\u2714' },
-  lost:        { label: 'Lost',        color: 'var(--red)',    bg: 'var(--red-light)',    emoji: '\u2716' },
+  outstanding: { label: 'Outstanding', color: 'var(--accent)', bg: 'var(--accent-light)',  emoji: '\u23F3' },
+  won:         { label: 'Won',         color: 'var(--green)',  bg: 'var(--green-light)',   emoji: '\u2714' },
+  lost:        { label: 'Lost',        color: 'var(--red)',    bg: 'var(--red-light)',     emoji: '\u2716' },
+  redundant:   { label: 'Redundant',   color: '#6B7280',       bg: '#E5E7EB',              emoji: '\u29B8' },
 };
 function statusBadge(status) {
   const m = STATUS_META[status] || STATUS_META.outstanding;
@@ -2748,6 +2808,14 @@ function renderModal() {
       </div>
     </div>`;
   }
+  // v24: Lost Jobs diagnostic modal
+  if (m.type === 'lostJobs') {
+    return `<div class="modal-overlay" onclick="if(event.target===this){state.modal=null;render()}">
+      <div class="modal" style="width:900px;max-width:95vw;max-height:90vh;overflow-y:auto">
+        ${m.content}
+      </div>
+    </div>`;
+  }
   // Default modal
   return `<div class="modal-overlay" onclick="if(event.target===this){state.modal=null;render()}">
     <div class="modal">
@@ -2813,12 +2881,15 @@ function exportPDF() {
   doc.rect(14, y - 4, pw - 28, 8, 'F');
   doc.setFont('helvetica', 'bold');
   doc.setFontSize(10);
-  doc.text(`${state.doors.length} Doors    |    Total (ex VAT): ${fmt(totalSell)}`, 18, y + 1);
+  // v25: count the actual number of doors (sum of qty across all rows), not just the row count
+  const totalDoorCount = state.doors.reduce((s, d) => s + lineQty(d), 0);
+  doc.text(`${totalDoorCount} Door${totalDoorCount===1?'':'s'} across ${state.doors.length} Line${state.doors.length===1?'':'s'}    |    Total (ex VAT): ${fmt(totalSell)}`, 18, y + 1);
   y += 12;
 
   // ── SCHEDULE TABLE ──
   const fieldMap = {
     doorId: { label:'Door ID', val: d => d.doorId },
+    qty: { label:'Qty', val: d => lineQty(d) },
     doorType: { label:'Type', val: d => d.doorType === 'MANUAL' ? (d.manualDesc || 'MANUAL') : (d.doorType||'').replace('SINGLE ACTION ','') },
     width: { label:'W', val: d => d.width },
     height: { label:'H', val: d => d.height },
@@ -2920,12 +2991,13 @@ function exportPDF() {
 
 function exportExcel() {
   if (state.doors.length === 0) { showToast('Add some doors first!'); return; }
-  const headers = ['Door ID','Door Type','Width','Height','Handing','Fire Rating','VP','Door Finish','Frame Finish',
+  // v25: Qty column added so the spreadsheet matches the on-screen schedule + PDF
+  const headers = ['Door ID','Qty','Door Type','Width','Height','Handing','Fire Rating','VP','Door Finish','Frame Finish',
     'Arch Finish','Over Panel','Hinge','Intumescent','Closer','Lever','Push/Pull','Lockcase','Escutcheon',
     'Flush Bolt','Kick Plate','Combi Lock','Finger Guard','Signage','Threshold','Dropseal','Cylinder','Door Stop',
     'Door+VP Cost','Frame Cost','Arch Cost','O/Panel Cost','Hardware Cost','Added Uplift','Total Cost','Sell Price','Comments'];
   const data = state.doors.map(d => [
-    d.doorId, d.doorType, d.width, d.height, d.handing, d.fireRating, d.vp, d.doorFinish, d.frameFinish,
+    d.doorId, lineQty(d), d.doorType, d.width, d.height, d.handing, d.fireRating, d.vp, d.doorFinish, d.frameFinish,
     d.archFinish, d.overPanel, d.hinge, d.intumescent, d.closer, d.lever, d.pushPull, d.lockcase, d.escutcheon,
     d.flushBolt, d.kickPlate, d.combiLock, d.fingerGuard, d.signage, d.threshold, d.dropseal, d.cylinder, d.doorStop,
     calcDoorCost(d)+calcVPCost(d), calcFrameCost(d), calcArchCost(d), calcOverPanelCost(d), calcHardwareCost(d), d.addedUplift||0,
@@ -2967,6 +3039,7 @@ function importFromExcel(event) {
         'door type': 'doorType', 'doortype': 'doorType', 'type': 'doorType', 'door description': 'doorType',
         'leaf type': 'doorType', 'leaftype': 'doorType', 'description': 'doorType',
         // Dimensions
+        'qty': 'qty', 'quantity': 'qty', 'qnty': 'qty', 'q': 'qty',
         'width': 'width', 'door width': 'width', 'w': 'width',
         'height': 'height', 'door height': 'height', 'h': 'height',
         // Handing
@@ -3236,7 +3309,9 @@ function renderDashboard() {
   const pipelineValue   = outstanding.reduce((s,j) => s + computeJobTotalSell(j), 0);
   const wonValueYTD     = wonThisYear .reduce((s,j) => s + computeJobTotalSell(j), 0);
   const lostValueYTD    = lostThisYear.reduce((s,j) => s + computeJobTotalSell(j), 0);
-  const avgQuoteValue   = state.savedJobs.length ? state.savedJobs.reduce((s,j) => s + computeJobTotalSell(j), 0) / state.savedJobs.length : 0;
+  // v24: exclude redundant from averages
+  const nonRedundant    = state.savedJobs.filter(j => (j.status||'outstanding') !== 'redundant');
+  const avgQuoteValue   = nonRedundant.length ? nonRedundant.reduce((s,j) => s + computeJobTotalSell(j), 0) / nonRedundant.length : 0;
   const decidedThisYear = wonThisYear.length + lostThisYear.length;
   const winRate         = decidedThisYear ? Math.round(wonThisYear.length / decidedThisYear * 100) : null;
 
@@ -3314,7 +3389,7 @@ function renderDashboard() {
         ${kpiCard({
           label:'AVG QUOTE', icon:'≡',
           value:fmt(avgQuoteValue),
-          sub:`Across ${state.savedJobs.length} saved quote${state.savedJobs.length===1?'':'s'}`,
+          sub:`Across ${nonRedundant.length} active quote${nonRedundant.length===1?'':'s'}`,
           foot: lostValueYTD ? `Lost YTD: ${fmt(lostValueYTD)}` : '',
           bg:'linear-gradient(135deg, #7030A0 0%, #4f2272 100%)', fg:'white'
         })}
@@ -3428,8 +3503,9 @@ function renderDashboard() {
                     <td style="padding:14px 20px;text-align:center"><span style="display:inline-block;background:${ageBg};color:${ageColor};padding:3px 10px;border-radius:12px;font-size:11px;font-weight:700">${age}d</span></td>
                     <td style="padding:14px 20px;text-align:right;font-weight:700;font-size:14px;color:var(--text)">${value ? fmt(value) : '<span style="color:var(--text-muted);font-weight:400">—</span>'}</td>
                     <td style="padding:10px 20px;text-align:right;white-space:nowrap">
-                      <button class="btn btn-sm" style="background:var(--green);color:white;padding:5px 12px;font-size:11px;border-radius:4px" onclick="event.stopPropagation();setJobStatus(state.savedJobs[${i}], 'won')">Won</button>
-                      <button class="btn btn-sm" style="background:var(--red);color:white;padding:5px 12px;font-size:11px;border-radius:4px" onclick="event.stopPropagation();setJobStatus(state.savedJobs[${i}], 'lost')">Lost</button>
+                      <button class="btn btn-sm" style="background:var(--green);color:white;padding:5px 12px;font-size:11px;border-radius:4px" onclick="event.stopPropagation();setJobStatus(state.savedJobs[${i}], 'won')" title="Mark this quote as Won">Won</button>
+                      <button class="btn btn-sm" style="background:var(--red);color:white;padding:5px 12px;font-size:11px;border-radius:4px" onclick="event.stopPropagation();setJobStatus(state.savedJobs[${i}], 'lost')" title="Mark this quote as Lost">Lost</button>
+                      <button class="btn btn-sm" style="background:#6B7280;color:white;padding:5px 12px;font-size:11px;border-radius:4px" onclick="event.stopPropagation();setJobStatus(state.savedJobs[${i}], 'redundant')" title="Exclude this quote from all totals (duplicate, test entry, etc.)">Redundant</button>
                       <button class="btn btn-outline btn-sm" style="padding:5px 12px;font-size:11px;border-radius:4px" onclick="event.stopPropagation();loadSavedJob(${i})">Open</button>
                     </td>
                   </tr>
@@ -3448,13 +3524,15 @@ function renderFolderTreeNode(node, depth) {
   const f = node.folder;
   const expanded = state.expandedFolders.has(f.id);
   const childCount = node.children.length;
+  // v24: count direct + nested so users see a hint that sub-folders contain jobs
   const directJobs = state.savedJobs.filter(j => (j.folderId || null) === f.id && (state.jobsStatusFilter === 'all' || (j.status || 'outstanding') === state.jobsStatusFilter)).length;
+  const nestedJobs = folderJobCount(f.id, state.jobsStatusFilter) - directJobs;
   const selected = state.currentFolderId === f.id;
   let html = `
     <div style="display:flex;align-items:center;gap:4px;padding:5px 8px 5px ${8 + depth*16}px;cursor:pointer;border-radius:4px;background:${selected ? 'var(--primary-light)' : 'transparent'};font-size:13px;font-weight:${selected?600:500}" onclick="state.currentFolderId='${f.id}';render()">
       <span onclick="event.stopPropagation();toggleFolderExpanded('${f.id}')" style="width:14px;display:inline-block;text-align:center;color:var(--text-muted)">${childCount ? (expanded ? '▾' : '▸') : ''}</span>
       <span style="flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">📁 ${esc(f.name)}</span>
-      <span style="font-size:11px;color:var(--text-muted)">${directJobs}</span>
+      <span style="font-size:11px;color:var(--text-muted)" title="${directJobs} in this folder${nestedJobs ? `, ${nestedJobs} in sub-folders` : ''}">${directJobs}${nestedJobs ? `<span style="color:var(--accent);margin-left:3px">+${nestedJobs}</span>` : ''}</span>
       <span onclick="event.stopPropagation();renameFolderPrompt('${f.id}')" style="opacity:0.5;padding:0 4px" title="Rename">&#9998;</span>
       <span onclick="event.stopPropagation();deleteFolderPrompt('${f.id}')" style="opacity:0.5;padding:0 4px;color:var(--red)" title="Delete folder">&times;</span>
     </div>
@@ -3500,13 +3578,17 @@ function renderJobs() {
 
   // Decide which jobs to show
   let visibleJobs;
+  let directInFolder = 0, nestedInFolder = 0;
   if (cf === '__all__' || cf === null) {
-    // null = "all (any folder)" view
     visibleJobs = state.savedJobs;
   } else if (cf === '__unfiled__') {
     visibleJobs = state.savedJobs.filter(j => !j.folderId);
   } else {
-    visibleJobs = state.savedJobs.filter(j => j.folderId === cf);
+    // v24: RECURSIVE — show jobs in this folder AND any sub-folder beneath
+    const descendantIds = getFolderDescendantIds(cf);
+    visibleJobs = state.savedJobs.filter(j => descendantIds.has(j.folderId));
+    directInFolder = visibleJobs.filter(j => j.folderId === cf).length;
+    nestedInFolder = visibleJobs.length - directInFolder;
   }
   if (filter !== 'all') visibleJobs = visibleJobs.filter(j => (j.status || 'outstanding') === filter);
   if (search) visibleJobs = visibleJobs.filter(j => (j.projectName||'').toLowerCase().includes(search) || (j.customer && JSON.stringify(j.customer).toLowerCase().includes(search)));
@@ -3515,7 +3597,7 @@ function renderJobs() {
 
   return `
     <div class="header">
-      <h1>Saved Jobs ${cf && cf !== '__all__' && cf !== '__unfiled__' ? `<span style="font-size:14px;font-weight:400;color:var(--text-muted)"> &middot; ${esc(folderPath(cf))}</span>` : ''}</h1>
+      <h1>Saved Jobs ${cf && cf !== '__all__' && cf !== '__unfiled__' ? `<span style="font-size:14px;font-weight:400;color:var(--text-muted)"> &middot; ${esc(folderPath(cf))}${nestedInFolder ? ` <span style="color:var(--accent);font-weight:600">(${directInFolder} here + ${nestedInFolder} in sub-folders)</span>` : ''}</span>` : ''}</h1>
       <div class="header-actions">
         <input type="text" placeholder="\u{1F50D} Search projects..." value="${esc(state.jobsSearch||'')}" oninput="state.jobsSearch=this.value;render()" style="width:200px;padding:8px 12px;border:1px solid var(--border);border-radius:5px;font-size:13px">
         <select onchange="state.jobsStatusFilter=this.value;render()" style="padding:8px 10px;border:1px solid var(--border);border-radius:5px;font-size:13px">
@@ -3523,12 +3605,14 @@ function renderJobs() {
           <option value="outstanding" ${filter==='outstanding'?'selected':''}>Outstanding only</option>
           <option value="won" ${filter==='won'?'selected':''}>Won only</option>
           <option value="lost" ${filter==='lost'?'selected':''}>Lost only</option>
+          <option value="redundant" ${filter==='redundant'?'selected':''}>Redundant only</option>
         </select>
         <span style="font-size:12px;padding:4px 10px;border-radius:12px;font-weight:600;${fbReady ? 'color:var(--green);background:var(--green-light)' : 'color:var(--text-muted);background:#f0f0f0'}">${fbReady ? '&#9679; Cloud Synced' : '&#9679; Local Only'}</span>
         <button class="btn btn-success" onclick="quickSave()">${state.currentJobId ? '&#128190; Save' : '&#128190; Save New'}</button>
         <button class="btn btn-primary" onclick="saveCurrentJob()">Save As New</button>
         <button class="btn btn-outline" onclick="document.getElementById('jobFileInput').click()">Import Job File</button>
         <input type="file" id="jobFileInput" accept=".json" style="display:none" onchange="importJobFile(event)">
+        <button class="btn btn-outline" onclick="showLostJobs()" title="Show every job in the database, ignoring filters and folders">&#x1F50E; Find Lost</button>
       </div>
     </div>
     <div style="display:flex;flex:1;overflow:hidden">
@@ -3582,6 +3666,7 @@ function renderJobs() {
                     <button class="btn btn-primary btn-sm" onclick="loadSavedJob(${i})">Open</button>
                     ${status !== 'won'  ? `<button class="btn btn-sm" style="background:var(--green);color:white" onclick="setJobStatus(state.savedJobs[${i}], 'won')">Mark Won</button>` : ''}
                     ${status !== 'lost' ? `<button class="btn btn-sm" style="background:var(--red);color:white"   onclick="setJobStatus(state.savedJobs[${i}], 'lost')">Mark Lost</button>` : ''}
+                    ${status !== 'redundant' ? `<button class="btn btn-sm" style="background:#6B7280;color:white" onclick="setJobStatus(state.savedJobs[${i}], 'redundant')" title="Excludes this job from dashboard totals">Mark Redundant</button>` : ''}
                     ${status !== 'outstanding' ? `<button class="btn btn-outline btn-sm" onclick="setJobStatus(state.savedJobs[${i}], 'outstanding')">Re-open</button>` : ''}
                   </div>
                   <div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap">
