@@ -1623,7 +1623,7 @@ function renderSchedule() {
     { key:'height',      thClass:'', thLabel:'HEIGHT', thStyle:'', cell: (d,idx) => `<input type="number" value="${d.height}" oninput="updText(${idx},'height',this)" onblur="updTextBlur(${idx},'height',this)" placeholder="mm">` },
     { key:'handing',     thClass:'', thLabel:'HAND', thStyle:'', cell: (d,idx) => sel(idx, 'handing', HANDING, d.handing) },
     { key:'fireRating',  thClass:'group-spec', thLabel:'FIRE', thStyle:'', cell: (d,idx) => sel(idx, 'fireRating', FIRE_RATINGS, d.fireRating) },
-    { key:'vp',          thClass:'group-spec', thLabel:'VP', thStyle:'', cell: (d,idx) => sel(idx, 'vp', [0,1,2,3,4].map(v=>({value:v,label:String(v)})), d.vp) },
+    { key:'vp',          thClass:'group-spec', thLabel:'VP', thStyle:'', cell: (d,idx) => sel(idx, 'vp', [0,1,2,3,4,5,6,7,8].map(v=>({value:v,label:String(v)})), d.vp) },
     { key:'doorFinish',  thClass:'group-spec', thLabel:'DOOR FIN', thStyle:'', cell: (d,idx) => sel(idx, 'doorFinish', FINISHES, d.doorFinish) },
     { key:'frameFinish', thClass:'group-spec', thLabel:'FRAME FIN', thStyle:'', cell: (d,idx) => sel(idx, 'frameFinish', FRAME_FINISHES, d.frameFinish) },
     { key:'archFinish',  thClass:'group-spec', thLabel:'ARCH FIN', thStyle:'', cell: (d,idx) => sel(idx, 'archFinish', archTypes, d.archFinish) },
