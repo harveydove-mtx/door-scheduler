@@ -556,6 +556,15 @@ function initFirestore() {
         const data = snap.data();
         if (data.rates) {
           state.rates = JSON.parse(data.rates);
+          // v25.2: strip legacy 'None' hardware items (now hardcoded in hwOptions)
+          if (state.rates && state.rates.hardware) {
+            for (const catKey in state.rates.hardware) {
+              state.rates.hardware[catKey] = (state.rates.hardware[catKey] || [])
+                .filter(item => item && item.type && item.type !== 'None');
+            }
+          }
+          // v25.2: ensure hardwareDefaults map exists
+          if (!state.rates.hardwareDefaults) state.rates.hardwareDefaults = {};
           // Restore custom categories from Firebase
           if (data.customCategories) {
             const cats = JSON.parse(data.customCategories);
@@ -1081,16 +1090,22 @@ function startAutosave() {
 startAutosave();
 
 function createDoor() {
+  // v25.2: pull user-set defaults from Rates page (Star icon). Falls back to 'None'.
+  const D = (state.rates && state.rates.hardwareDefaults) || {};
   return {
     id: state.nextId++,
     qty: 1,
     doorId: '', customerType: '', doorType: '', width: '', height: '',
     handing: 'N/A', fireRating: 'FD30', vp: 0, vpSize: '', doorFinish: 'PRIMED',
     frameFinish: 'PRIMED', archFinish: 'NONE', overPanel: 'NONE',
-    hinge: 'None', intumescent: 'None', closer: 'None', lever: 'None',
-    pushPull: 'None', lockcase: 'None', escutcheon: 'None', flushBolt: 'None',
-    kickPlate: 'None', combiLock: 'None', fingerGuard: 'None', signage: 'None',
-    threshold: 'None', dropseal: 'None', cylinder: 'None', doorStop: 'None',
+    hinge: D.hinges || 'None', intumescent: D.intumescents || 'None',
+    closer: D.closers || 'None', lever: D.levers || 'None',
+    pushPull: D.pushPull || 'None', lockcase: D.lockcases || 'None',
+    escutcheon: D.escutcheons || 'None', flushBolt: D.flushBolts || 'None',
+    kickPlate: D.kickPlates || 'None', combiLock: D.combiLocks || 'None',
+    fingerGuard: D.fingerGuards || 'None', signage: D.signage || 'None',
+    threshold: D.thresholds || 'None', dropseal: D.dropseals || 'None',
+    cylinder: D.cylinders || 'None', doorStop: D.doorStops || 'None',
     addedUplift: 0, sellOverride: null, manualDesc: '', manualCost: 0, complete: false, comments: '',
   };
 }
@@ -1311,9 +1326,34 @@ function sel(idx, field, options, currentVal, extraClass) {
 }
 
 // Build hardware select options — with + Add New
+// v25.2: hardware category key -> door field name (for orphan value scanning)
+const CAT_TO_FIELD = {
+  hinges:'hinge', closers:'closer', intumescents:'intumescent', lockcases:'lockcase',
+  levers:'lever', pushPull:'pushPull', combiLocks:'combiLock', escutcheons:'escutcheon',
+  flushBolts:'flushBolt', kickPlates:'kickPlate', fingerGuards:'fingerGuard',
+  signage:'signage', thresholds:'threshold', dropseals:'dropseal', cylinders:'cylinder',
+  doorStops:'doorStop',
+};
 function hwOptions(cat) {
   const items = state.rates.hardware[cat] || [];
-  const opts = items.map(i => ({ value: i.type, label: i.type }));
+  const seen = new Set(['None']);
+  const opts = [{ value: 'None', label: 'None' }]; // v25.2: hardcoded, unrenamable
+  for (const i of items) {
+    if (!i || !i.type || seen.has(i.type)) continue;
+    if (i.type === 'None') continue; // skip legacy 'None' rate items — hardcoded above
+    opts.push({ value: i.type, label: i.type });
+    seen.add(i.type);
+  }
+  // v25.2: orphan support — inject any values used on doors that aren't in the rates,
+  // labelled "(removed)" so users can see what got deleted rather than losing the value silently
+  const doorField = CAT_TO_FIELD[cat] || cat;
+  for (const d of (state.doors || [])) {
+    const v = d && d[doorField];
+    if (v && !seen.has(v) && !String(v).startsWith('__ADD_NEW__')) {
+      opts.push({ value: v, label: v + ' (removed)' });
+      seen.add(v);
+    }
+  }
   opts.push({ value: '__ADD_NEW__' + cat, label: '+ Add New...' });
   return opts;
 }
@@ -2410,13 +2450,21 @@ function renderRates() {
         </div>
       </div>
       <table class="rate-table">
-        <thead><tr><th style="width:60%">Product</th><th>Cost (&pound;)</th><th style="width:60px"></th></tr></thead>
+        <thead><tr><th style="width:55%">Product</th><th>Cost (&pound;)</th><th style="width:110px;text-align:center" title="Star = default value for new doors in this category">Default</th><th style="width:40px"></th></tr></thead>
         <tbody>
-          ${items.map((item, i) => `<tr>
-            <td><input value="${esc(item.type)}" onchange="updRate('${cat}',${i},'type',this.value)"></td>
-            <td><input type="number" step="0.01" value="${item.cost}" onchange="updRate('${cat}',${i},'cost',parseFloat(this.value)||0)"></td>
-            <td><span class="delete-row" onclick="delRate('${cat}',${i})">&times;</span></td>
-          </tr>`).join('')}
+          ${items.map((item, i) => {
+            const currentDefault = (state.rates.hardwareDefaults||{})[cat];
+            const isDefault = currentDefault === item.type;
+            const safeType = String(item.type).replace(/\\/g,'\\\\').replace(/'/g,"\\'");
+            return `<tr${isDefault ? ' style="background:#FFF9E6"' : ''}>
+              <td><input value="${esc(item.type)}" onchange="updRate('${cat}',${i},'type',this.value)"></td>
+              <td><input type="number" step="0.01" value="${item.cost}" onchange="updRate('${cat}',${i},'cost',parseFloat(this.value)||0)"></td>
+              <td style="text-align:center">
+                <button onclick="setAsDefault('${cat}', '${safeType}')" style="background:none;border:none;cursor:pointer;font-size:18px;padding:2px 8px;color:${isDefault ? '#D4A017' : '#CCC'};font-weight:600" title="${isDefault ? 'Default for new doors — click to clear' : 'Set as default for new doors'}">${isDefault ? '★' : '☆'}</button>
+              </td>
+              <td><span class="delete-row" onclick="delRate('${cat}',${i})">&times;</span></td>
+            </tr>`;
+          }).join('')}
         </tbody>
       </table>
     `;
@@ -2692,7 +2740,31 @@ function delOverPanelRate(idx) {
 }
 
 function addHWItem() { state.rates.hardware[state.rateCategory].push({ type: 'New Item', cost: 0 }); render(); saveRatesToFirebase(); }
-function updRate(cat, idx, key, val) { state.rates.hardware[cat][idx][key] = val; render(); saveRatesToFirebase(); }
+function updRate(cat, idx, key, val) {
+  // v25.2: reject "None" as an item name — it's a reserved built-in value in the dropdowns
+  if (key === 'type' && String(val).trim().toLowerCase() === 'none') {
+    showToast('"None" is reserved — pick another name');
+    render();
+    return;
+  }
+  state.rates.hardware[cat][idx][key] = val;
+  render();
+  saveRatesToFirebase();
+}
+// v25.2: set / clear the default hardware value for a category (used by createDoor)
+function setAsDefault(cat, type) {
+  if (!state.rates.hardwareDefaults) state.rates.hardwareDefaults = {};
+  if (!type || state.rates.hardwareDefaults[cat] === type) {
+    // Toggle off: clicking a starred item again clears the default
+    delete state.rates.hardwareDefaults[cat];
+    showToast('Cleared default');
+  } else {
+    state.rates.hardwareDefaults[cat] = type;
+    showToast('Default set: new doors will use "' + type + '"');
+  }
+  render();
+  saveRatesToFirebase();
+}
 function delRate(cat, idx) { state.rates.hardware[cat].splice(idx, 1); render(); saveRatesToFirebase(); }
 
 // ════════════════════════════════════════════
@@ -3832,9 +3904,10 @@ function loadSavedJob(idx) {
   state.projectName = job.projectName || 'Loaded Project';
   state.markup = job.markup || 0.22;
   // Handle both stringified (Firebase) and object (local) formats
-  const rates = typeof job.rates === 'string' ? JSON.parse(job.rates) : job.rates;
   const doors = typeof job.doors === 'string' ? JSON.parse(job.doors) : job.doors;
-  state.rates = JSON.parse(JSON.stringify(rates));
+  // v25.2: DELIBERATELY DO NOT overwrite state.rates. The live rates (from Firebase)
+  // stay in place so that new products added since this job was saved remain visible
+  // in the dropdowns. Historical prices are preserved on the dashboard via computeJobTotalSell.
   state.doors = JSON.parse(JSON.stringify(doors));
   state.nextId = job.nextId || state.doors.length + 1;
   state.hiddenCols = new Set(job.hiddenCols || []);
