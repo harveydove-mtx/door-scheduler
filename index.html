@@ -552,44 +552,77 @@ function initFirestore() {
     // Listen for real-time changes to shared rates
     db.collection('config').doc('rates').onSnapshot(snap => {
       if (_skipFireSync) return;
-      if (snap.exists) {
-        const data = snap.data();
-        if (data.rates) {
-          state.rates = JSON.parse(data.rates);
-          // v25.2: strip legacy 'None' hardware items (now hardcoded in hwOptions)
-          if (state.rates && state.rates.hardware) {
-            for (const catKey in state.rates.hardware) {
-              state.rates.hardware[catKey] = (state.rates.hardware[catKey] || [])
-                .filter(item => item && item.type && item.type !== 'None');
-            }
-          }
-          // v25.2: ensure hardwareDefaults map exists
-          if (!state.rates.hardwareDefaults) state.rates.hardwareDefaults = {};
-          // Restore custom categories from Firebase
-          if (data.customCategories) {
-            const cats = JSON.parse(data.customCategories);
-            for (const cc of cats) {
-              if (!HW_CATEGORIES.find(c => c.key === cc.key)) {
-                HW_CATEGORIES.push(cc);
-                if (!SCHEDULE_COLS.find(sc => sc.key === cc.key))
-                  SCHEDULE_COLS.push({ key: cc.key, label: cc.label, group: 'hw' });
-              }
-            }
-          }
-          // Restore custom frame finishes from Firebase
-          if (data.customFrameFinishes) {
-            const cff = JSON.parse(data.customFrameFinishes);
-            for (const ff of cff) {
-              if (!FRAME_FINISHES.includes(ff)) {
-                FRAME_FINISHES.push(ff);
-                FRAME_FINISH_KEY_MAP[ff] = frameFinishKey(ff);
-              }
-            }
-          }
-          render();
+      if (!snap.exists) return;
+      const data = snap.data();
+      if (!data.rates) return;
+      // v25.4: If the local user is ACTIVELY on the Rates page AND the incoming
+      // update is from another user, don't clobber their in-progress edits.
+      // Instead, store the update as pending and show a banner (rendered in the
+      // Rates page header). User can click Refresh to apply, or continue editing
+      // and let the version-check dialog handle the conflict at save time.
+      const incomingBy = data.updatedBy || null;
+      const isFromOtherUser = incomingBy && incomingBy !== _me() && incomingBy !== 'team';
+      if (state.page === 'rates' && isFromOtherUser) {
+        state.pendingRatesUpdate = {
+          rates: data.rates,
+          updatedAt: data.updatedAt || null,
+          updatedBy: incomingBy,
+          customCategories: data.customCategories || null,
+          customFrameFinishes: data.customFrameFinishes || null,
+        };
+        render();
+        return; // do NOT overwrite state.rates while editing
+      }
+      // Otherwise (or if we're not on the Rates page), apply immediately as before.
+      _applyRatesFromSnapshot(data);
+      render();
+    });
+
+    // v25.5: helper — apply a rates snapshot to state. Uses _readRatesFromDoc which
+    // handles BOTH the new nested-field format and the legacy JSON-string blob so
+    // this works across the v25.4 -> v25.5 transition.
+    window._applyRatesFromSnapshot = function(data) {
+      if (!data) return;
+      const merged = _readRatesFromDoc(data);
+      if (!merged) return;
+      state.rates = merged;
+      // v25.5: remember what we now consider "loaded" for future diff-based saves
+      _ratesSnapshotAtLoad = _cloneRates(state.rates);
+      _ratesLoadedUpdatedAt = data.updatedAt || null;
+      state._ratesLastUpdatedBy = data.updatedBy || null;
+      state._ratesLastUpdatedAt = data.updatedAt || null;
+      // v25.2: strip legacy 'None' hardware items
+      if (state.rates && state.rates.hardware) {
+        for (const catKey in state.rates.hardware) {
+          state.rates.hardware[catKey] = (state.rates.hardware[catKey] || [])
+            .filter(item => item && item.type && item.type !== 'None');
         }
       }
-    });
+      if (!state.rates.hardwareDefaults) state.rates.hardwareDefaults = {};
+      if (!state.rates.matCodes) state.rates.matCodes = {};
+      // Restore custom categories
+      if (data.customCategories) {
+        const cats = typeof data.customCategories === 'string' ? JSON.parse(data.customCategories) : data.customCategories;
+        for (const cc of cats) {
+          if (!HW_CATEGORIES.find(c => c.key === cc.key)) {
+            HW_CATEGORIES.push(cc);
+            if (!SCHEDULE_COLS.find(sc => sc.key === cc.key))
+              SCHEDULE_COLS.push({ key: cc.key, label: cc.label, group: 'hw' });
+          }
+        }
+      }
+      // Restore custom frame finishes
+      if (data.customFrameFinishes) {
+        const cff = typeof data.customFrameFinishes === 'string' ? JSON.parse(data.customFrameFinishes) : data.customFrameFinishes;
+        for (const ff of cff) {
+          if (!FRAME_FINISHES.includes(ff)) {
+            FRAME_FINISHES.push(ff);
+            FRAME_FINISH_KEY_MAP[ff] = frameFinishKey(ff);
+          }
+        }
+      }
+      state.pendingRatesUpdate = null;
+    };
     // Listen for real-time changes to shared jobs
     db.collection('jobs').onSnapshot(snap => {
       if (_skipFireSync) return;
@@ -651,24 +684,239 @@ function saveToStorage() {
 
 // Save shared rates to Firebase (called when rates or products change)
 let _ratesSaveTimer = null;
+// v25.3: track the updatedAt we last loaded so we can detect concurrent edits
+let _ratesLoadedUpdatedAt = null;
+// v25.5: track the FULL rates snapshot at load time so we can compute what THIS
+// user actually changed. Used by the auto-diff save to write only changed field paths
+// (ERP-style granular merge — two users editing different categories don't conflict).
+let _ratesSnapshotAtLoad = null;
+
+// v25.5: normalise a rates object (deep clone via JSON) so we can compare cleanly
+function _cloneRates(r) {
+  try { return JSON.parse(JSON.stringify(r || {})); } catch(e) { return {}; }
+}
+
+// v25.5: given two rates objects, return a Set of field paths that differ.
+// Field paths look like: 'doors', 'vpRates', 'frames', 'architraves', 'overPanels',
+// 'matCodes', 'hardwareDefaults', 'hardware.hinges', 'hardware.closers', etc.
+const _RATE_TOP_FIELDS = ['doors','vpRates','frames','architraves','overPanels','matCodes','hardwareDefaults'];
+function _diffRates(a, b) {
+  const changed = new Set();
+  const ja = a || {}, jb = b || {};
+  for (const f of _RATE_TOP_FIELDS) {
+    if (JSON.stringify(ja[f]) !== JSON.stringify(jb[f])) changed.add(f);
+  }
+  const cats = new Set([
+    ...Object.keys(ja.hardware || {}),
+    ...Object.keys(jb.hardware || {}),
+  ]);
+  for (const c of cats) {
+    if (JSON.stringify((ja.hardware||{})[c]) !== JSON.stringify((jb.hardware||{})[c])) {
+      changed.add('hardware.' + c);
+    }
+  }
+  return changed;
+}
+
+// v25.5: pretty label for a field path (used in conflict messages)
+function _prettyRatePath(path) {
+  if (path.startsWith('hardware.')) {
+    const catKey = path.slice(9);
+    const cat = HW_CATEGORIES.find(c => c.key === catKey);
+    return cat ? cat.label : catKey;
+  }
+  const labels = { doors:'Door Rates', vpRates:'VP Rates', frames:'Frame Rates',
+                   architraves:'Architrave Rates', overPanels:'Over Panel Rates',
+                   matCodes:'MAT Codes', hardwareDefaults:'Hardware Defaults' };
+  return labels[path] || path;
+}
+
+// v25.5: read a rates value at a field path from state.rates
+function _rateValueAtPath(path) {
+  if (path.startsWith('hardware.')) return state.rates.hardware[path.slice(9)];
+  return state.rates[path];
+}
+
+// v25.5: given a doc snapshot, reconstruct the full rates object, prefering the
+// new nested format where present but falling back to the legacy JSON string blob
+// for anything not yet migrated. Robust across the v25.4/v25.5 transition.
+function _readRatesFromDoc(data) {
+  if (!data) return null;
+  // Start from legacy blob (if any) as the baseline
+  let base = null;
+  if (data.rates) {
+    try { base = JSON.parse(data.rates); } catch(e) { base = null; }
+  }
+  if (!base) base = { doors:[], vpRates:[], frames:[], architraves:[], overPanels:[], hardware:{}, matCodes:{}, hardwareDefaults:{} };
+  // Override with any new-format nested fields (they win over legacy for fresher data)
+  for (const f of _RATE_TOP_FIELDS) {
+    if (data[f] !== undefined) base[f] = data[f];
+  }
+  if (data.hardware && typeof data.hardware === 'object' && !Array.isArray(data.hardware)) {
+    if (!base.hardware) base.hardware = {};
+    for (const c of Object.keys(data.hardware)) {
+      base.hardware[c] = data.hardware[c];
+    }
+  }
+  return base;
+}
+
 function saveRatesToFirebase() {
   if (!fbReady) return;
   clearTimeout(_ratesSaveTimer);
-  _ratesSaveTimer = setTimeout(() => {
+  _ratesSaveTimer = setTimeout(async () => {
     _skipFireSync = true;
-    const customCats = HW_CATEGORIES.filter(c => !BUILTIN_HW_KEYS.includes(c.key));
-    const defaultFF = ['PRIMED','HARDWOOD/OAK','HARDWOOD SPRAY','SPRAY'];
-    const customFF = FRAME_FINISHES.filter(f => !defaultFF.includes(f));
-    db.collection('config').doc('rates').set({
-      rates: JSON.stringify(state.rates),
-      customCategories: JSON.stringify(customCats),
-      customFrameFinishes: JSON.stringify(customFF),
-      updatedAt: new Date().toISOString(),
-      updatedBy: 'team',
-    }).then(() => { _skipFireSync = false; })
-      .catch(() => { _skipFireSync = false; });
-  }, 500); // debounce 500ms
+    try {
+      const customCats = HW_CATEGORIES.filter(c => !BUILTIN_HW_KEYS.includes(c.key));
+      const defaultFF = ['PRIMED','HARDWOOD/OAK','HARDWOOD SPRAY','SPRAY'];
+      const customFF = FRAME_FINISHES.filter(f => !defaultFF.includes(f));
+
+      // v25.5: auto-diff — compute the field paths this user has actually changed
+      // since we loaded. This is what we'll write. Anything else stays untouched
+      // in Firestore, so other users' concurrent edits to OTHER categories survive.
+      const loadedRates = _ratesSnapshotAtLoad || _cloneRates(state.rates);
+      const myDiff = _diffRates(loadedRates, state.rates);
+
+      // v25.5: refined conflict detection — read current remote, compute what THEY
+      // changed since we loaded. Only prompt if OUR diff overlaps THEIRS (i.e. we
+      // both touched the same category). Different-category concurrent edits pass silently.
+      let snap = null;
+      try { snap = await db.collection('config').doc('rates').get(); } catch(e) {}
+      let theirRates = null, theirDiff = new Set();
+      if (snap && snap.exists) {
+        theirRates = _readRatesFromDoc(snap.data());
+        theirDiff = _diffRates(loadedRates, theirRates);
+      }
+      const overlap = [...myDiff].filter(p => theirDiff.has(p));
+      if (overlap.length > 0) {
+        const overlapLabel = overlap.map(_prettyRatePath).join(', ');
+        const remoteBy = (snap.data() && snap.data().updatedBy) || 'someone';
+        const overwrite = confirm(
+          'Rate conflict on: ' + overlapLabel + '\n\n' +
+          remoteBy + ' also edited ' + (overlap.length === 1 ? 'this' : 'these') + ' while you were editing.\n\n' +
+          'OK = Save yours (theirs will be lost for the overlapping items only)\n' +
+          'Cancel = Reload theirs (your changes to the overlapping items will be lost)'
+        );
+        if (!overwrite) {
+          if (theirRates) {
+            state.rates = _cloneRates(theirRates);
+            _ratesSnapshotAtLoad = _cloneRates(state.rates);
+            _ratesLoadedUpdatedAt = snap.data().updatedAt || null;
+            state._ratesLastUpdatedBy = snap.data().updatedBy || null;
+            state._ratesLastUpdatedAt = snap.data().updatedAt || null;
+          }
+          _skipFireSync = false;
+          render();
+          showToast('Reloaded — your changes were discarded');
+          return;
+        }
+      }
+
+      // Nothing changed and no conflict? Bail early.
+      if (myDiff.size === 0) {
+        _skipFireSync = false;
+        return;
+      }
+
+      // v25.5: build patch containing only the field paths this user changed,
+      // PLUS a fresh legacy JSON blob for backwards compat with v25.4 clients.
+      const nowIso = new Date().toISOString();
+      const patch = {
+        updatedAt: nowIso,
+        updatedBy: _me(),
+        customCategories: JSON.stringify(customCats),
+        customFrameFinishes: JSON.stringify(customFF),
+        // Legacy blob keeps v25.4 clients (and any offline caches) able to read
+        rates: JSON.stringify(state.rates),
+      };
+      for (const path of myDiff) {
+        patch[path] = _rateValueAtPath(path);
+        // Audit trail: which user last edited this specific category
+        const auditKey = 'categoryLastEditedBy.' + path.replace(/\./g, '__');
+        patch[auditKey] = _me();
+      }
+      await db.collection('config').doc('rates').update(patch);
+      _ratesLoadedUpdatedAt = nowIso;
+      _ratesSnapshotAtLoad = _cloneRates(state.rates);
+    } catch(e) {
+      console.warn('saveRatesToFirebase failed:', e);
+    } finally {
+      _skipFireSync = false;
+    }
+  }, 500);
 }
+
+// v25.3: JOB EDIT LOCK
+// When a user opens a saved job, we write { lockedBy, lockedAt } to the job document.
+// The lock refreshes every 30s via heartbeat while the user is on it. Locks older
+// than 60s are considered stale and other users can take over.
+// This lets two users see who has a job open, and warns before overwriting.
+let _lockedJobId = null;
+let _lockHeartbeatId = null;
+let _lockLoadedAt = null; // timestamp we saw on the doc when we loaded it (for stale-detection)
+const LOCK_HEARTBEAT_MS = 30000;
+const LOCK_STALE_MS     = 60000;
+
+function _me() {
+  return (_currentUser && _currentUser.email) || 'unknown@matrixhardware.co.uk';
+}
+
+function acquireJobLock(jobId) {
+  if (!fbReady || !jobId) return Promise.resolve();
+  const now = new Date().toISOString();
+  return db.collection('jobs').doc(jobId).update({
+    lockedBy: _me(),
+    lockedAt: now,
+    lastEditedBy: _me(),
+    lastEditedAt: now,
+  }).then(() => {
+    _lockedJobId = jobId;
+    _lockLoadedAt = now;
+    _startLockHeartbeat();
+  }).catch(err => console.warn('acquireJobLock failed', err));
+}
+
+function _startLockHeartbeat() {
+  if (_lockHeartbeatId) clearInterval(_lockHeartbeatId);
+  _lockHeartbeatId = setInterval(() => {
+    if (!_lockedJobId || !fbReady) return;
+    db.collection('jobs').doc(_lockedJobId).update({
+      lockedBy: _me(),
+      lockedAt: new Date().toISOString(),
+    }).catch(() => {});
+  }, LOCK_HEARTBEAT_MS);
+}
+
+function releaseJobLock() {
+  const jobId = _lockedJobId;
+  _lockedJobId = null;
+  if (_lockHeartbeatId) { clearInterval(_lockHeartbeatId); _lockHeartbeatId = null; }
+  if (!jobId || !fbReady) return Promise.resolve();
+  return db.collection('jobs').doc(jobId).update({
+    lockedBy: null,
+    lockedAt: null,
+  }).catch(() => {});
+}
+
+// If job is locked by someone else within LOCK_STALE_MS, return { by, at }. Else null.
+function jobLockedByOther(job) {
+  if (!job || !job.lockedBy) return null;
+  if (job.lockedBy === _me()) return null;
+  const t = new Date(job.lockedAt).getTime();
+  if (isNaN(t)) return null;
+  if (Date.now() - t > LOCK_STALE_MS) return null; // stale
+  return { by: job.lockedBy, at: job.lockedAt };
+}
+
+// Release lock cleanly when leaving the page or signing out
+window.addEventListener('beforeunload', () => {
+  if (_lockedJobId && fbReady) {
+    // Best-effort synchronous release
+    try {
+      db.collection('jobs').doc(_lockedJobId).update({ lockedBy: null, lockedAt: null });
+    } catch(e) {}
+  }
+});
 
 // Save a job to Firebase
 function saveJobToFirebase(job, existingId) {
@@ -679,6 +927,9 @@ function saveJobToFirebase(job, existingId) {
   data.rates = JSON.stringify(data.rates || {});
   data.doors = JSON.stringify(data.doors || []);
   if (data.customer && typeof data.customer === 'object') data.customer = JSON.stringify(data.customer);
+  // v25.3: track last-editor for visibility
+  data.lastEditedBy = _me();
+  data.lastEditedAt = new Date().toISOString();
   if (existingId) {
     // Update existing document
     return db.collection('jobs').doc(existingId).set(data).then(() => existingId);
@@ -877,18 +1128,20 @@ function loadFromStorage() {
         }
       }
     }
-    // Restore current project
+    // v25.3: FRESH BOOT — do NOT auto-restore the last-open project.
+    // Reason: when multiple users share one Firebase, auto-restoring means each user
+    // lands back on the same job every time they open the app, which causes silent
+    // overwrites when two people edit "the same" job simultaneously.
+    // Instead: land clean on the dashboard. To resume work, user explicitly opens
+    // a job from Saved Jobs (which acquires an edit lock — see below).
+    //
+    // Only preserve column preferences and markup (personal, non-conflicting settings).
     const projRaw = localStorage.getItem(STORAGE_KEYS.currentProject);
     if (projRaw) {
       const proj = JSON.parse(projRaw);
-      state.projectName = proj.projectName || 'New Project';
       state.markup = proj.markup ?? 0.22;
-      state.rates = proj.rates || JSON.parse(JSON.stringify(DEFAULT_RATES));
-      state.doors = (proj.doors || []).map(d => ({ qty: 1, ...d, qty: (parseInt(d && d.qty,10) >= 1 ? parseInt(d.qty,10) : 1) }));
-      state.nextId = proj.nextId || state.doors.length + 1;
       state.hiddenCols = new Set(proj.hiddenCols || []);
-      if (proj.customer) state.customer = proj.customer;
-      if (proj.currentJobId) state.currentJobId = proj.currentJobId;
+      // DO NOT restore: projectName, doors, currentJobId, customer — force fresh session
     }
     // Restore saved jobs from localStorage (Firebase will overwrite if connected)
     const jobsRaw = localStorage.getItem(STORAGE_KEYS.savedJobs);
@@ -999,6 +1252,12 @@ function _onSignedIn(user) {
 }
 
 function _onSignedOut() {
+  // v25.3: release edit lock before losing DB access
+  if (_lockedJobId && fbReady) {
+    try { db.collection('jobs').doc(_lockedJobId).update({ lockedBy: null, lockedAt: null }); } catch(e){}
+    _lockedJobId = null;
+    if (_lockHeartbeatId) { clearInterval(_lockHeartbeatId); _lockHeartbeatId = null; }
+  }
   _currentUser = null;
   fbReady = false;
   db = null;
@@ -1750,7 +2009,7 @@ function renderSchedule() {
 
   return `
     <div class="header">
-      <h1>Door Schedule &mdash; <span contenteditable="true" onblur="state.projectName=this.textContent" style="border-bottom:1px dashed var(--border);outline:none;padding:0 4px">${esc(state.projectName)}</span></h1>
+      <h1>Door Schedule &mdash; <span contenteditable="true" onblur="state.projectName=this.textContent" style="border-bottom:1px dashed var(--border);outline:none;padding:0 4px">${esc(state.projectName)}</span>${state.readOnlyLock ? `<span style="margin-left:14px;padding:4px 10px;border-radius:12px;background:var(--red-light);color:var(--red);font-size:12px;font-weight:700">🔒 READ-ONLY · locked by ${esc(state.readOnlyLock.by)}</span>` : ''}</h1>
       <div class="header-actions">
         <div style="position:relative;display:inline-flex">
           <button class="btn btn-success" onclick="quickSave()" style="font-weight:700;border-radius:5px 0 0 5px">
@@ -2470,11 +2729,33 @@ function renderRates() {
     `;
   }
 
+  // v25.3: read last-updated-by for display (populated by saveRatesToFirebase)
+  const _ratesLastBy = state._ratesLastUpdatedBy || '';
+  const _ratesLastAt = state._ratesLastUpdatedAt || _ratesLoadedUpdatedAt || '';
+  const _ratesWhen = _ratesLastAt ? (function(){ const d=new Date(_ratesLastAt); return isNaN(d.getTime()) ? _ratesLastAt : d.toLocaleString('en-GB', { day:'numeric', month:'short', hour:'2-digit', minute:'2-digit' }); })() : '';
+  // v25.4: pending-update banner when someone else saved while we're editing
+  const pending = state.pendingRatesUpdate;
+  const pendingBanner = pending ? `
+    <div style="background:linear-gradient(90deg, #FFF7D6, #FFEEB0); border-left:4px solid var(--accent); padding:10px 16px; margin-bottom:14px; border-radius:6px; display:flex; justify-content:space-between; align-items:center; gap:12px">
+      <div style="font-size:13px">
+        <strong style="color:var(--accent)">⚡ Rates were saved by ${esc(pending.updatedBy)} while you were editing.</strong>
+        <div style="font-size:11px; color:var(--text-muted); margin-top:2px">Your local edits are preserved. Click Refresh to load theirs (your changes will be lost), or continue editing — the save-time conflict check will let you choose.</div>
+      </div>
+      <div style="display:flex; gap:6px; flex-shrink:0">
+        <button class="btn btn-primary btn-sm" onclick="_applyRatesFromSnapshot({rates: state.pendingRatesUpdate.rates, updatedAt: state.pendingRatesUpdate.updatedAt, updatedBy: state.pendingRatesUpdate.updatedBy, customCategories: state.pendingRatesUpdate.customCategories, customFrameFinishes: state.pendingRatesUpdate.customFrameFinishes}); render(); showToast('Loaded latest rates')">🔄 Refresh</button>
+        <button class="btn btn-outline btn-sm" onclick="state.pendingRatesUpdate = null; render(); showToast('Keeping your edits — save will prompt on conflict')">Keep editing</button>
+      </div>
+    </div>
+  ` : '';
   return `
     <div class="header">
       <h1>Rates &amp; Products</h1>
-      <span style="font-size:12px;padding:4px 10px;border-radius:12px;font-weight:600;${fbReady ? 'color:var(--green);background:var(--green-light)' : 'color:var(--text-muted);background:#f0f0f0'}">${fbReady ? '&#9679; Shared — changes sync to all users' : '&#9679; Local Only — set up Firebase to share'}</span>
+      <div style="display:flex;gap:10px;align-items:center">
+        ${_ratesLastBy ? `<span style="font-size:11px;color:var(--text-muted)">✎ Last edited by ${esc(_ratesLastBy)} · ${_ratesWhen}</span>` : ''}
+        <span style="font-size:12px;padding:4px 10px;border-radius:12px;font-weight:600;${fbReady ? 'color:var(--green);background:var(--green-light)' : 'color:var(--text-muted);background:#f0f0f0'}">${fbReady ? '&#9679; Shared — changes sync to all users' : '&#9679; Local Only — set up Firebase to share'}</span>
+      </div>
     </div>
+    ${pendingBanner ? `<div class="content" style="padding-bottom:0">${pendingBanner}</div>` : ''}
     <div class="content">
       <div class="rates-layout">
         <div class="rates-cats">
@@ -3314,6 +3595,9 @@ function toggleSidebar() {
 }
 
 function newProject() {
+  // v25.3: release any active edit lock when starting a new project
+  if (_lockedJobId) releaseJobLock();
+  state.readOnlyLock = null;
   state.modal = {
     title: 'Start New Project?',
     body: '<p>This will clear the current schedule and start fresh. Your rates database will be kept. Save the current job first if you want to keep it.</p>',
@@ -3733,6 +4017,20 @@ function renderJobs() {
                   <div style="font-size:12px;color:var(--text-muted);margin-bottom:8px">
                     ${doorCount} row${doorCount!==1?'s':''} &middot; ${totalDoors} door${totalDoors!==1?'s':''} ${totalSell!==null ? '&middot; '+fmt(totalSell) : ''}
                   </div>
+                  ${(() => {
+                    // v25.3: lock indicator + last-edited-by
+                    const otherLock = jobLockedByOther(job);
+                    const lastBy = job.lastEditedBy;
+                    const lastAt = job.lastEditedAt;
+                    const parts = [];
+                    if (otherLock) parts.push(`<span style="font-size:11px;color:var(--red);font-weight:600">🔒 Locked by ${esc(otherLock.by)}</span>`);
+                    if (lastBy && lastAt) {
+                      const d = new Date(lastAt);
+                      const when = isNaN(d.getTime()) ? lastAt : d.toLocaleString('en-GB', { day:'numeric', month:'short', hour:'2-digit', minute:'2-digit' });
+                      parts.push(`<span style="font-size:11px;color:var(--text-muted)">✎ ${esc(lastBy)} · ${when}</span>`);
+                    }
+                    return parts.length ? `<div style="margin-bottom:8px;display:flex;flex-direction:column;gap:2px">${parts.join('')}</div>` : '';
+                  })()}
                   ${job.folderId ? `<div style="font-size:11px;color:var(--text-muted);margin-bottom:10px">📁 ${esc(folderPath(job.folderId))}</div>` : ''}
                   <div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:8px">
                     <button class="btn btn-primary btn-sm" onclick="loadSavedJob(${i})">Open</button>
@@ -3841,6 +4139,11 @@ function buildJobData() {
 
 // Quick save — updates existing job if loaded, or creates new
 function quickSave(silent) {
+  // v25.3: read-only lock check
+  if (state.readOnlyLock) {
+    showToast('Read-only — job is locked by ' + state.readOnlyLock.by);
+    return;
+  }
   const job = buildJobData();
   if (fbReady) {
     saveJobToFirebase(job, state.currentJobId).then((docId) => {
@@ -3901,6 +4204,25 @@ function saveCurrentJob() {
 function loadSavedJob(idx) {
   const job = state.savedJobs[idx];
   if (!job) return;
+  // v25.3: check edit lock BEFORE opening
+  const otherLock = jobLockedByOther(job);
+  if (otherLock) {
+    const lockAge = Math.round((Date.now() - new Date(otherLock.at).getTime()) / 1000);
+    const proceed = confirm(
+      `This job is currently being edited by ${otherLock.by} (active ${lockAge}s ago).\n\n` +
+      `Opening it now may cause conflicts — their changes could overwrite yours (or vice versa) at save time.\n\n` +
+      `OK = Open anyway as READ-ONLY (you can view but not save until they release the lock)\n` +
+      `Cancel = Do not open`
+    );
+    if (!proceed) return;
+    state.readOnlyLock = otherLock;
+    showToast('Opened read-only — locked by ' + otherLock.by);
+  } else {
+    state.readOnlyLock = null;
+    // Release any previous lock before acquiring the new one
+    if (_lockedJobId && _lockedJobId !== job._fbId) releaseJobLock();
+    if (job._fbId) acquireJobLock(job._fbId);
+  }
   state.projectName = job.projectName || 'Loaded Project';
   state.markup = job.markup || 0.22;
   // Handle both stringified (Firebase) and object (local) formats
