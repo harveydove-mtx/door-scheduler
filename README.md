@@ -10,9 +10,12 @@ Matrix Hardware Door Scheduler
 | What it must do | [docs/v2-functional-spec.md](docs/v2-functional-spec.md) |
 | Database design | [docs/v2-data-model.md](docs/v2-data-model.md) |
 | SQL (Postgres) | [db/](db): migrations, seed, queries, tests |
+| Pricing engine | [app/src/domain/](app/src/domain): pure TypeScript, tested against the V1 code in `index.html` |
 
-Run the database tests (needs PostgreSQL 15+ installed locally; no Firebase involved):
+Tests (nothing here touches Firebase):
 
 ```bash
-db/test.sh
+db/test.sh                      # database: needs PostgreSQL 15+ installed locally
+cd app && npm ci && npm test    # pricing engine
+npm run typecheck
 ```

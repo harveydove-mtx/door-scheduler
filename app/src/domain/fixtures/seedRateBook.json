@@ -1,0 +1,471 @@
+{
+    "vpRates": [
+        {
+            "price": 127.01,
+            "matCode": null,
+            "fireRatingCode": "FD30"
+        },
+        {
+            "price": 194.77,
+            "matCode": null,
+            "fireRatingCode": "FD60"
+        },
+        {
+            "price": 100.42,
+            "matCode": null,
+            "fireRatingCode": "NFR"
+        }
+    ],
+    "doorRates": [
+        {
+            "price": 461.84,
+            "matCode": null,
+            "doorTypeId": "SASL",
+            "finishCode": "LAMINATE",
+            "fireRatingCode": "FD30"
+        },
+        {
+            "price": 387.43,
+            "matCode": null,
+            "doorTypeId": "SASL",
+            "finishCode": "PRIMED",
+            "fireRatingCode": "FD30"
+        },
+        {
+            "price": 187.59,
+            "matCode": null,
+            "doorTypeId": "SASL",
+            "finishCode": "SPRAY",
+            "fireRatingCode": "FD30"
+        },
+        {
+            "price": 488.15,
+            "matCode": null,
+            "doorTypeId": "SASL",
+            "finishCode": "VENEER",
+            "fireRatingCode": "FD30"
+        },
+        {
+            "price": 592.85,
+            "matCode": null,
+            "doorTypeId": "SASL",
+            "finishCode": "LAMINATE",
+            "fireRatingCode": "FD60"
+        },
+        {
+            "price": 518.43,
+            "matCode": null,
+            "doorTypeId": "SASL",
+            "finishCode": "PRIMED",
+            "fireRatingCode": "FD60"
+        },
+        {
+            "price": 187.59,
+            "matCode": null,
+            "doorTypeId": "SASL",
+            "finishCode": "SPRAY",
+            "fireRatingCode": "FD60"
+        },
+        {
+            "price": 619.15,
+            "matCode": null,
+            "doorTypeId": "SASL",
+            "finishCode": "VENEER",
+            "fireRatingCode": "FD60"
+        },
+        {
+            "price": 461.84,
+            "matCode": null,
+            "doorTypeId": "SASL",
+            "finishCode": "LAMINATE",
+            "fireRatingCode": "NFR"
+        },
+        {
+            "price": 387.43,
+            "matCode": null,
+            "doorTypeId": "SASL",
+            "finishCode": "PRIMED",
+            "fireRatingCode": "NFR"
+        },
+        {
+            "price": 187.59,
+            "matCode": null,
+            "doorTypeId": "SASL",
+            "finishCode": "SPRAY",
+            "fireRatingCode": "NFR"
+        },
+        {
+            "price": 488.15,
+            "matCode": null,
+            "doorTypeId": "SASL",
+            "finishCode": "VENEER",
+            "fireRatingCode": "NFR"
+        },
+        {
+            "price": 733.81,
+            "matCode": null,
+            "doorTypeId": "SALH",
+            "finishCode": "LAMINATE",
+            "fireRatingCode": "FD30"
+        },
+        {
+            "price": 578.91,
+            "matCode": null,
+            "doorTypeId": "SALH",
+            "finishCode": "PRIMED",
+            "fireRatingCode": "FD30"
+        },
+        {
+            "price": 187.59,
+            "matCode": null,
+            "doorTypeId": "SALH",
+            "finishCode": "SPRAY",
+            "fireRatingCode": "FD30"
+        },
+        {
+            "price": 758.45,
+            "matCode": null,
+            "doorTypeId": "SALH",
+            "finishCode": "VENEER",
+            "fireRatingCode": "FD30"
+        },
+        {
+            "price": 884.26,
+            "matCode": null,
+            "doorTypeId": "SALH",
+            "finishCode": "LAMINATE",
+            "fireRatingCode": "FD60"
+        },
+        {
+            "price": 729.36,
+            "matCode": null,
+            "doorTypeId": "SALH",
+            "finishCode": "PRIMED",
+            "fireRatingCode": "FD60"
+        },
+        {
+            "price": 187.59,
+            "matCode": null,
+            "doorTypeId": "SALH",
+            "finishCode": "SPRAY",
+            "fireRatingCode": "FD60"
+        },
+        {
+            "price": 908.90,
+            "matCode": null,
+            "doorTypeId": "SALH",
+            "finishCode": "VENEER",
+            "fireRatingCode": "FD60"
+        },
+        {
+            "price": 733.81,
+            "matCode": null,
+            "doorTypeId": "SALH",
+            "finishCode": "LAMINATE",
+            "fireRatingCode": "NFR"
+        },
+        {
+            "price": 578.91,
+            "matCode": null,
+            "doorTypeId": "SALH",
+            "finishCode": "PRIMED",
+            "fireRatingCode": "NFR"
+        },
+        {
+            "price": 187.59,
+            "matCode": null,
+            "doorTypeId": "SALH",
+            "finishCode": "SPRAY",
+            "fireRatingCode": "NFR"
+        },
+        {
+            "price": 758.45,
+            "matCode": null,
+            "doorTypeId": "SALH",
+            "finishCode": "VENEER",
+            "fireRatingCode": "NFR"
+        },
+        {
+            "price": 770.56,
+            "matCode": null,
+            "doorTypeId": "SADL",
+            "finishCode": "LAMINATE",
+            "fireRatingCode": "FD30"
+        },
+        {
+            "price": 621.72,
+            "matCode": null,
+            "doorTypeId": "SADL",
+            "finishCode": "PRIMED",
+            "fireRatingCode": "FD30"
+        },
+        {
+            "price": 187.59,
+            "matCode": null,
+            "doorTypeId": "SADL",
+            "finishCode": "SPRAY",
+            "fireRatingCode": "FD30"
+        },
+        {
+            "price": 823.17,
+            "matCode": null,
+            "doorTypeId": "SADL",
+            "finishCode": "VENEER",
+            "fireRatingCode": "FD30"
+        },
+        {
+            "price": 943.43,
+            "matCode": null,
+            "doorTypeId": "SADL",
+            "finishCode": "LAMINATE",
+            "fireRatingCode": "FD60"
+        },
+        {
+            "price": 794.60,
+            "matCode": null,
+            "doorTypeId": "SADL",
+            "finishCode": "PRIMED",
+            "fireRatingCode": "FD60"
+        },
+        {
+            "price": 187.59,
+            "matCode": null,
+            "doorTypeId": "SADL",
+            "finishCode": "SPRAY",
+            "fireRatingCode": "FD60"
+        },
+        {
+            "price": 996.04,
+            "matCode": null,
+            "doorTypeId": "SADL",
+            "finishCode": "VENEER",
+            "fireRatingCode": "FD60"
+        },
+        {
+            "price": 770.56,
+            "matCode": null,
+            "doorTypeId": "SADL",
+            "finishCode": "LAMINATE",
+            "fireRatingCode": "NFR"
+        },
+        {
+            "price": 621.72,
+            "matCode": null,
+            "doorTypeId": "SADL",
+            "finishCode": "PRIMED",
+            "fireRatingCode": "NFR"
+        },
+        {
+            "price": 187.59,
+            "matCode": null,
+            "doorTypeId": "SADL",
+            "finishCode": "SPRAY",
+            "fireRatingCode": "NFR"
+        },
+        {
+            "price": 823.17,
+            "matCode": null,
+            "doorTypeId": "SADL",
+            "finishCode": "VENEER",
+            "fireRatingCode": "NFR"
+        }
+    ],
+    "doorTypes": [
+        {
+            "id": "SASL",
+            "formCode": "SASL",
+            "description": "SINGLE ACTION SINGLE LEAF",
+            "needsFlushBolts": false
+        },
+        {
+            "id": "SALH",
+            "formCode": "SALH",
+            "description": "SINGLE ACTION LEAF AND HALF",
+            "needsFlushBolts": true
+        },
+        {
+            "id": "SADL",
+            "formCode": "SADL",
+            "description": "SINGLE ACTION DOUBLE LEAF",
+            "needsFlushBolts": true
+        }
+    ],
+    "frameRates": [
+        {
+            "price": 0.00,
+            "matCode": null,
+            "doorTypeId": "SASL",
+            "finishCode": "HARDWOOD SPRAY"
+        },
+        {
+            "price": 226.20,
+            "matCode": null,
+            "doorTypeId": "SASL",
+            "finishCode": "HARDWOOD/OAK"
+        },
+        {
+            "price": 0.00,
+            "matCode": null,
+            "doorTypeId": "SASL",
+            "finishCode": "PRIMED"
+        },
+        {
+            "price": 85.00,
+            "matCode": null,
+            "doorTypeId": "SASL",
+            "finishCode": "SPRAY"
+        },
+        {
+            "price": 0.00,
+            "matCode": null,
+            "doorTypeId": "SALH",
+            "finishCode": "HARDWOOD SPRAY"
+        },
+        {
+            "price": 260.80,
+            "matCode": null,
+            "doorTypeId": "SALH",
+            "finishCode": "HARDWOOD/OAK"
+        },
+        {
+            "price": 0.00,
+            "matCode": null,
+            "doorTypeId": "SALH",
+            "finishCode": "PRIMED"
+        },
+        {
+            "price": 95.00,
+            "matCode": null,
+            "doorTypeId": "SALH",
+            "finishCode": "SPRAY"
+        },
+        {
+            "price": 0.00,
+            "matCode": null,
+            "doorTypeId": "SADL",
+            "finishCode": "HARDWOOD SPRAY"
+        },
+        {
+            "price": 260.80,
+            "matCode": null,
+            "doorTypeId": "SADL",
+            "finishCode": "HARDWOOD/OAK"
+        },
+        {
+            "price": 0.00,
+            "matCode": null,
+            "doorTypeId": "SADL",
+            "finishCode": "PRIMED"
+        },
+        {
+            "price": 95.00,
+            "matCode": null,
+            "doorTypeId": "SADL",
+            "finishCode": "SPRAY"
+        }
+    ],
+    "architraves": [
+        {
+            "id": "PRIMED",
+            "price": 0.00,
+            "matCode": null
+        },
+        {
+            "id": "SPRAY",
+            "price": 0.00,
+            "matCode": null
+        },
+        {
+            "id": "BESPOKE",
+            "price": 40.00,
+            "matCode": null
+        },
+        {
+            "id": "TBC",
+            "price": 0.00,
+            "matCode": null
+        }
+    ],
+    "fireRatings": [
+        {
+            "code": "NFR",
+            "baseCode": null,
+            "isFireDoor": false
+        },
+        {
+            "code": "FD30",
+            "baseCode": null,
+            "isFireDoor": true
+        },
+        {
+            "code": "FD30S",
+            "baseCode": "FD30",
+            "isFireDoor": true
+        },
+        {
+            "code": "FD60",
+            "baseCode": null,
+            "isFireDoor": true
+        },
+        {
+            "code": "FD60S",
+            "baseCode": "FD60",
+            "isFireDoor": true
+        }
+    ],
+    "liningRates": [
+    ],
+    "doorFinishes": [
+        {
+            "code": "PRIMED",
+            "baseFinishCode": null
+        },
+        {
+            "code": "LAMINATE",
+            "baseFinishCode": null
+        },
+        {
+            "code": "VENEER",
+            "baseFinishCode": null
+        },
+        {
+            "code": "SPRAY",
+            "baseFinishCode": "PRIMED"
+        }
+    ],
+    "overPanelRates": [
+        {
+            "price": 211.65,
+            "matCode": null,
+            "doorTypeId": "SASL",
+            "finishCode": "LAMINATE",
+            "panelTypeCode": "GLAZED",
+            "fireRatingCode": "FD30"
+        },
+        {
+            "price": 199.85,
+            "matCode": null,
+            "doorTypeId": "SASL",
+            "finishCode": "LAMINATE",
+            "panelTypeCode": "SOLID",
+            "fireRatingCode": "FD30"
+        },
+        {
+            "price": 177.22,
+            "matCode": null,
+            "doorTypeId": "SASL",
+            "finishCode": "LAMINATE",
+            "panelTypeCode": "GLAZED",
+            "fireRatingCode": "NFR"
+        },
+        {
+            "price": 189.01,
+            "matCode": null,
+            "doorTypeId": "SASL",
+            "finishCode": "LAMINATE",
+            "panelTypeCode": "SOLID",
+            "fireRatingCode": "NFR"
+        }
+    ],
+    "liningDepthThresholdMm": 150
+}

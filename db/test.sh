@@ -31,6 +31,13 @@ echo "== migrations"
 for f in migrations/*.sql; do echo "   $f"; "${PSQL[@]}" -f "$f"; done
 echo "== seed"
 "${PSQL[@]}" -f seed.sql
+echo "== pricing-engine rate fixture matches seed"
+FIXTURE=../app/src/domain/fixtures/seedRateBook.json
+if ! diff -q <("${PSQL[@]}" -A -t -f export_ratebook.sql) "$FIXTURE" >/dev/null; then
+  echo "   FAIL: $FIXTURE is out of date. Regenerate it with:"
+  echo "   psql \$DATABASE_URL -X -A -t -f db/export_ratebook.sql > app/src/domain/fixtures/seedRateBook.json"
+  exit 1
+fi
 echo "== sample data"
 "${PSQL[@]}" -f sample_data.sql
 

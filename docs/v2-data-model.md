@@ -104,7 +104,7 @@ The tests cover this exactly: two estimators on different doors both save; a sta
 
 ## 4. How prices and totals work
 
-- **The pricing engine** (Step 2, TypeScript) looks up the rates for a door and saves the answer on the line as the **snapshot** (`cost_door`, `cost_vp`, …). Hardware snapshots are copied from the catalogue automatically when a product is added or swapped.
+- **The pricing engine** ([`app/src/domain/pricing.ts`](../app/src/domain/pricing.ts)) looks up the rates for a door and saves the answer on the line as the **snapshot** (`cost_door`, `cost_vp`, …). Hardware snapshots are copied from the catalogue automatically when a product is added or swapped.
 - **The database does the adding up**, in views, so every screen gets the same answer:
   - unit cost = door + VPs + frame or lining + architrave + over panel + hardware (qty × cost) + uplift + lining uplift
   - line cost = unit cost × qty
