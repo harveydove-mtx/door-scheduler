@@ -78,7 +78,7 @@ On GitHub, open `harveydove-mtx/door-scheduler` → **Settings → Secrets and v
    - Value: open the downloaded JSON file in Notepad and paste **the whole contents**.
 2. On the **Variables** tab, choose **New repository variable**:
    - Name: `FIREBASE_PROJECT_ID_V2`
-   - Value: the project ID from step 1, e.g. `matrix-door-scheduler-v2`.
+   - Value: `matrixdoorschedulerv2` (the V2 project ID).
 3. **Delete the downloaded JSON file** from your PC, including from the recycle bin. GitHub keeps it encrypted, and nobody needs another copy.
 
 ## 7. Tell me it's done
@@ -92,7 +92,7 @@ That first deploy:
 - creates all the tables and loads the starting rates (the V1 defaults);
 - deploys the app.
 
-When it finishes, the app is at **`https://<project-id>.web.app`**. Sign in with an account from step 2 and start filling in MAT codes and prices.
+When it finishes, the app is at **<https://matrixdoorschedulerv2.web.app>**. Sign in with an account from step 2 and start filling in MAT codes and prices.
 
 A custom address such as `scheduler-v2.matrixhardware.co.uk` is added later (Hosting → Add custom domain, plus two DNS records).
 
