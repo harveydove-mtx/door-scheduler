@@ -40,3 +40,7 @@ PREPARE reprice_job_hardware_preview AS :q
 PREPARE reprice_job_hardware AS :q
 \set q `cat queries/dashboard_summary.sql`
 PREPARE dashboard_summary AS :q
+\set q `cat queries/mat_code_table.sql`
+PREPARE mat_code_table AS :q
+\set q `cat queries/set_mat_code.sql`
+PREPARE set_mat_code AS :q

@@ -14,7 +14,7 @@ BEGIN;
 INSERT INTO settings (key, value, description) VALUES
   ('default_markup_pct',        '0.22',  'Markup on cost for new jobs (0.22 = 22%)'),
   ('quote_ref_prefix',          '"MH"',  'Prefix for quote references, e.g. MH-2026-0001'),
-  ('lining_depth_threshold_mm', 'null',  'Linings deeper than this (mm) need an uplift cost. TO CONFIRM (spec Q1).'),
+  ('lining_depth_threshold_mm', '150',   'Linings up to this depth (mm) are standard; deeper ones need an uplift cost'),
   ('quote_terms', jsonb_build_array(
      'Prices are valid for 30 days from the date of this quotation unless otherwise stated.',
      'All prices are exclusive of VAT unless stated otherwise.',

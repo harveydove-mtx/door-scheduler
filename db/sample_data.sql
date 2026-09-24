@@ -46,7 +46,7 @@ SELECT '00000000-0000-4000-8000-0000000000d1', '00000000-0000-4000-8000-00000000
 FROM door_types dt, architrave_types a WHERE dt.form_code = 'SASL' AND a.code = 'BESPOKE';
 
 -- D02: SADL, NFR, spray (primed 621.72 + spray 187.59 = 809.31), LINING 180mm deep with
--- no uplift entered yet (flags once a threshold is set), 2 flush bolts (2 x 7.32 = 14.64).
+-- no uplift entered yet (over the 150mm threshold, so flagged), 2 flush bolts (2 x 7.32 = 14.64).
 --   unit 823.95; sell round(823.95 x 1.22, 2) = 1005.22
 INSERT INTO job_doors (id, job_id, sort_order, qty, door_mark, location, door_type_id,
                        width_mm, height_mm, handing_code, fire_rating_code, door_finish_code,

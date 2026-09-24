@@ -21,10 +21,16 @@ SELECT pg_temp.ok(line_sell = round(2740.89 * 1.30, 2), 'changing job markup rep
 FROM v_job_door_lines WHERE door_mark = 'D01' AND job_id = '00000000-0000-4000-8000-0000000000a1';
 UPDATE jobs SET markup_pct = 0.22 WHERE id = '00000000-0000-4000-8000-0000000000a1';
 
--- Linings: depth over threshold needs an uplift (RAT-05a)
-SELECT pg_temp.ok(NOT needs_lining_uplift, 'no threshold set -> no uplift needed') FROM v_job_door_lines WHERE door_mark = 'D02';
+-- Linings: depth over the 150mm threshold needs an uplift (RAT-05a)
+SELECT pg_temp.ok(lining_depth_threshold_mm() = 150, 'lining threshold seeded at 150mm');
+SELECT pg_temp.ok(needs_lining_uplift, 'RAT-05a: 180mm lining over 150mm asks for uplift') FROM v_job_door_lines WHERE door_mark = 'D02';
+UPDATE job_doors SET lining_depth_mm = 150 WHERE door_mark = 'D02';
+SELECT pg_temp.ok(NOT needs_lining_uplift, 'RAT-05a: exactly 150mm is standard, no uplift') FROM v_job_door_lines WHERE door_mark = 'D02';
+UPDATE job_doors SET lining_depth_mm = 151 WHERE door_mark = 'D02';
+SELECT pg_temp.ok(needs_lining_uplift, 'RAT-05a: 151mm asks for uplift') FROM v_job_door_lines WHERE door_mark = 'D02';
+UPDATE settings SET value = 'null' WHERE key = 'lining_depth_threshold_mm';
+SELECT pg_temp.ok(NOT needs_lining_uplift, 'no threshold configured -> no uplift needed') FROM v_job_door_lines WHERE door_mark = 'D02';
 UPDATE settings SET value = '150' WHERE key = 'lining_depth_threshold_mm';
-SELECT pg_temp.ok(needs_lining_uplift, 'RAT-05a: 180mm lining over 150mm threshold asks for uplift') FROM v_job_door_lines WHERE door_mark = 'D02';
 SELECT pg_temp.ok(lining_uplift_missing = 1, 'RAT-05a: job shows 1 lining missing its uplift')
 FROM v_job_totals WHERE job_id = '00000000-0000-4000-8000-0000000000a1';
 UPDATE job_doors SET lining_uplift = 45 WHERE door_mark = 'D02';

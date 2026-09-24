@@ -10,7 +10,7 @@ The database is **PostgreSQL**. It is built and tested **locally only**; nothing
 | Starting data (V1 default rates, lists, T&Cs) | [`db/seed.sql`](../db/seed.sql) |
 | Dev/test sample jobs (never live) | [`db/sample_data.sql`](../db/sample_data.sql) |
 | The queries the app will run | [`db/queries/`](../db/queries) |
-| Automated tests (89 checks) | [`db/tests/`](../db/tests), run with `db/test.sh` |
+| Automated tests (108 checks) | [`db/tests/`](../db/tests), run with `db/test.sh` |
 
 ---
 
@@ -50,9 +50,9 @@ erDiagram
 ### Users and settings
 | Table | Holds | Notes |
 |---|---|---|
-| `app_users` | Firebase uid, email, name, **role** (admin / estimator / viewer) | Email **must** end `@matrixhardware.co.uk`, enforced by the database as well as sign-in |
+| `app_users` | Firebase uid, email, name, **role** (admin / estimator / viewer; not enforced yet) | Email **must** end `@matrixhardware.co.uk`, enforced by the database as well as sign-in |
 | `user_preferences` | Per-user column order, hidden columns, density | Replaces browser localStorage |
-| `settings` | Default markup, quote ref prefix, **lining depth threshold**, T&Cs, PDF footer | Admin-editable; T&Cs no longer hard-coded |
+| `settings` | Default markup (22%), quote ref prefix, **lining depth threshold (150 mm)**, T&Cs, PDF footer | Admin-editable; T&Cs no longer hard-coded |
 
 ### Lists and rates (were hard-coded or a single shared document in V1)
 | Table | One row per | Notes |
@@ -78,6 +78,7 @@ Every price is its **own row**, so two admins editing different prices never cla
 | `product_categories` | Hinges, Closers, … (the 16 V1 categories) | `door_field_key` is the grid/import column, so categories are data, not code. Holds the **default product + qty** for new doors |
 | `products` | **MAT code**, supplier code, description, finish, unit, **cost**, active, verified | MAT code unique, stored upper-case. A product can't be *verified* without a MAT code. **Quantity is not part of the product** |
 | `product_cost_history` | old cost → new cost, who, when | Written automatically on every cost change |
+| `mat_code_registry` | every MAT code in use and which row owns it | Makes MAT codes unique across products **and** all rate tables |
 
 ### Jobs
 | Table | Holds | Notes |
@@ -111,9 +112,22 @@ The tests cover this exactly: two estimators on different doors both save; a sta
   - `v_job_totals`: rows, doors, screens, total cost, total sell, margin %, number of linings missing their uplift
   - `v_jobs`: live jobs with totals and age; used by the job list and dashboard
 - **Prices rising in the catalogue don't change old quotes.** "Reprice to current rates" first shows a preview of the changes ([preview](../db/queries/reprice_job_hardware_preview.sql)), then applies them.
-- **Linings:** if a lining door's depth is over `settings.lining_depth_threshold_mm` and it has no lining uplift, the line is flagged (`needs_lining_uplift`). The app asks for the uplift, and the PDF is blocked until it's entered. The threshold is blank until you give us the number.
+- **Linings:** if a lining door's depth is over `settings.lining_depth_threshold_mm` and it has no lining uplift, the line is flagged (`needs_lining_uplift`). The app asks for the uplift, and the PDF is blocked until it's entered. The threshold is **150 mm** (linings up to 150 mm are standard; 151 mm or more asks for the uplift).
 
 The sample job's totals were worked out by hand from the V1 rates. The tests confirm V2 gets the same figures: D01 unit £913.63 → sell £3,343.89; job total sell £5,576.11.
+
+## 4a. MAT codes (filled in by Matrix)
+
+- **Every priced item has an optional MAT code:** products, and every door, vision panel, frame, lining, architrave and over panel rate row.
+- **One list to fill them in** (`v_mat_code_table`, [query](../db/queries/mat_code_table.sql)): every priced item described in words (e.g. *Door SASL SINGLE ACTION SINGLE LEAF / FD30 / Laminate*), with its current MAT code and cost. It works like a spreadsheet:
+  - Items **without a code come first**.
+  - It can be filtered by kind (product, door, frame…), limited to "missing only", and searched.
+- **Saving a code** ([query](../db/queries/set_mat_code.sql)):
+  - Each code saves on its own with the usual version check, so two people can fill codes in at the same time.
+  - Codes are trimmed and upper-cased.
+  - A code can only be used **once across everything**; the database refuses a duplicate and says where it's already used.
+- **Door lines keep the MAT codes they were priced with** (`mat_code_door`, `mat_code_vp`, `mat_code_surround`, `mat_code_architrave`, `mat_code_over_panel`), next to the cost snapshot. Hardware lines already keep theirs. Exports can then show MAT codes per door.
+- No MAT codes are seeded: 88 items are waiting for codes (29 products + 59 rate rows).
 
 ## 5. Search
 
@@ -147,10 +161,7 @@ This is done in the new V2 project only; the live V1 Firebase project is never t
 
 | # | Question | Affects |
 |---|---|---|
-| Q1 | **Lining depth threshold (mm)?** Is the lining base price per door type × finish, like frames? What lining finishes? | `settings`, `lining_rates`, `lining_finishes` |
-| Q10 | **MAT code list and format?** (e.g. an OGL export) | `products.mat_code` |
-| Q5 | Markup (V1) or margin? Per job only, or per line too? | `jobs.markup_pct` |
-| Q8 | Who are the admins? Is a read-only viewer needed? | `app_users.role` |
+| Q1 | Is the lining base price per door type × finish, like frames? What lining finishes and prices? (Threshold answered: **150 mm**) | `lining_rates`, `lining_finishes` |
 | Q11 | Do door or frame prices vary by size? | rate tables |
 | Q12 | Drop V1's unused `customerType` / `vpSize`? (V2 currently drops them) | `job_doors` |
 
@@ -160,4 +171,4 @@ This is done in the new V2 project only; the live V1 Firebase project is never t
 db/test.sh                        # throwaway local Postgres, deleted afterwards
 DATABASE_URL=postgres://… db/test.sh   # or an existing EMPTY database
 ```
-Needs PostgreSQL 15+ installed (server + client). Output: `== 89 checks passed, 0 file(s) failed`.
+Needs PostgreSQL 15+ installed (server + client). Output: `== 108 checks passed, 0 file(s) failed`.

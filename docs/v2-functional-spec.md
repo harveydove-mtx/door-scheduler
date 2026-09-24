@@ -30,9 +30,9 @@ Status tags used throughout:
 | ID | Requirement | Status |
 |---|---|---|
 | USR-01 | Only `@matrixhardware.co.uk` accounts can sign in. Other emails are rejected at sign-up. | CHANGE (V1: any account an admin created) |
-| USR-02 | **Admin** role: edit the catalogue, rates, categories and users; delete jobs; restore deleted jobs. | NEW |
-| USR-03 | **Estimator** role: create and edit jobs, clients and folders; add a product *request* (see CAT-09). | NEW |
-| USR-04 | **Viewer** role (optional): read-only access to jobs and the dashboard. | NEW, *to confirm* |
+| USR-02 | **Admin** role: edit the catalogue, rates, categories and users; delete jobs; restore deleted jobs. | NEW, **deferred** (2026-09-24: not needed yet; everyone can do everything for now, the role field is kept for later) |
+| USR-03 | **Estimator** role: create and edit jobs, clients and folders; add a product *request* (see CAT-09). | NEW, **deferred** |
+| USR-04 | **Viewer** role (optional): read-only access to jobs and the dashboard. | NEW, **deferred** |
 | USR-05 | "Prepared by" on quotes is the signed-in user's name, not the client contact. | CHANGE (V1 bug) |
 | USR-06 | Every record shows who created it and who last changed it, and when. | CHANGE |
 
@@ -42,7 +42,7 @@ V1 keeps hardware as a list of `{type, cost}` per category. It builds quantities
 
 | ID | Requirement | Status |
 |---|---|---|
-| CAT-01 | A product has these fields: **MAT code** (unique, required), description, category, supplier, supplier code, finish, unit (each/pair/set/metre), **cost £**, optional list price, active flag, notes and image URL. | NEW |
+| CAT-01 | A product has these fields: **MAT code** (unique; filled in by Matrix, see CAT-11), description, category, supplier, supplier code, finish, unit (each/pair/set/metre), **cost £**, optional list price, active flag, notes and image URL. | NEW |
 | CAT-02 | Categories are data, not code. The 16 V1 categories are seeded: hinges, closers, intumescents, lockcases, levers, push/pull, combination locks, escutcheons, flush bolts, kick plates, finger guards, signage, thresholds, dropseals, cylinders and door stops. Admins can add, rename, reorder and deactivate categories. | CHANGE |
 | CAT-03 | **Quantity is not part of the product.** "ZHSS243RS3 X 2" becomes the product ZHSS243RS3 at quantity 2 on the door. | CHANGE |
 | CAT-04 | A category can have a **default product and quantity** that new doors pick up (this replaces V1's star). | KEEP |
@@ -51,6 +51,7 @@ V1 keeps hardware as a list of `{type, cost}` per category. It builds quantities
 | CAT-07 | **Price history**: each cost change is recorded with the date and user. | NEW |
 | CAT-08 | Bulk import and update of products from Excel/CSV, matched on MAT code. It shows a preview of new, changed and unchanged rows before applying. | NEW |
 | CAT-09 | Estimators can add a product "on the fly" from the schedule, as in V1's "+ Add New…". It is flagged *unverified* until an admin approves it. | CHANGE |
+| CAT-11 | **MAT code table**: *every* priced item (products **and** door, vision panel, frame, lining, architrave and over panel rate rows) has an optional MAT code, **filled in by Matrix** from one spreadsheet-style list. The list shows items with no code first, can be filtered by kind and searched, and each code is saved on its own with the usual conflict check. A MAT code can only be used once across everything. Door lines keep the MAT codes they were priced with, for exports. | NEW (agreed 2026-09-24) |
 | CAT-10 | Suppliers list: name, account code and contact. | NEW |
 
 ## 4. Door, frame and lining rates
@@ -62,7 +63,7 @@ V1 keeps hardware as a list of `{type, cost}` per category. It builds quantities
 | RAT-03 | **Vision panel rates** per fire rating, with a glass description. | KEEP |
 | RAT-04 | **Frame rates**: form code × frame finish. Frame finishes are data (the V1 "custom frame finishes"). | KEEP |
 | RAT-05 | **Lining rates**: base price per door type × lining finish, like frames (*base price structure to confirm*). | NEW |
-| RAT-05a | **Lining depth**: the estimator enters the lining depth (mm) on each lining door. If the depth is **over the threshold** (an admin setting, value *to confirm*), the app **asks for an uplift cost £** for that line. A line over the threshold with no uplift is flagged as a warning and blocks the PDF quote until it is filled in. | NEW |
+| RAT-05a | **Lining depth**: the estimator enters the lining depth (mm) on each lining door. Linings **up to 150 mm** deep are standard (admin setting, default 150). If the depth is **over 150 mm**, the app **asks for an uplift cost £** for that line. A line over the threshold with no uplift is flagged as a warning and blocks the PDF quote until it is filled in. | NEW |
 | RAT-06 | **Architrave rates**: type → price (optionally per set or per door). | KEEP |
 | RAT-07 | **Over panel rates**: form code × fire rating × type (solid or glazed) × finish. | KEEP |
 | RAT-08 | Rate edits by different users on different rows never conflict. The same row edited at the same time prompts the user (see §9). | CHANGE |
@@ -241,15 +242,15 @@ Phase 2 scope (for reference, not built yet) gives a full hardware specification
 
 | # | Question | Why it matters |
 |---|---|---|
-| ~~Q1~~ | **Answered:** enter a lining depth; if it's over a threshold, ask for an uplift cost. *Still to confirm:* the **threshold value (mm)**, and whether the lining **base price** is per door type × finish like frames. | RAT-05/05a |
+| ~~Q1~~ | **Answered:** standard up to 150 mm; deeper asks for an uplift cost. *Still to confirm:* is the lining **base price** per door type × finish like frames, and what are the lining finishes and prices? | RAT-05/05a |
 | **Q2** | **Ironmongery schedule layout:** please attach the BLANK SCHEDULE TEMPLATE (xlsx) the export must match. | IRN-03/05 |
 | Q3 | *(deferred to phase 2)* **Ironmongery sets:** do you want sets (IRN-02), or is per-door enough for now? | Big effect on the data model |
 | **Q4** | **Kickplates:** priced per m², per size band, or as fixed products? What width allowance and heights? | IRN-06 |
-| **Q5** | **Markup or margin?** V1 applies *markup on cost* (22% default). Keep it, or quote by margin %? Allow a markup per line or per category? | Pricing engine |
+| ~~Q5~~ | **Answered:** keep V1's *markup on cost*, 22% default, per job. | Pricing engine |
 | **Q6** | **VAT:** show VAT and a gross total on the quote, or ex VAT only as now? | PDF |
 | **Q7** | **"A few more" modules:** door screens are confirmed (§7a). Which others are planned? (e.g. glazing, signage schedule, door furniture only, fire stopping, installation/labour, delivery charges) | Keeps the design open for them |
-| **Q8** | **Roles:** who should be admins? Is a read-only Viewer role needed? | USR-02..04 |
+| ~~Q8~~ | **Answered:** roles are deferred; not needed yet. | USR-02..04 |
 | **Q9** | **Sign-in method:** Microsoft 365 work accounts (best if Matrix uses M365), Google, or email + password? | USR-01 |
-| **Q10** | **MAT codes:** is there an existing MAT code list (e.g. an OGL export) to seed the catalogue from? What format is the code (e.g. `MAT12345`)? | CAT-01, seed data |
+| ~~Q10~~ | **Answered:** Matrix fills MAT codes in themselves, via a rates-table-style list (CAT-11). No codes are seeded. | CAT-01, CAT-11 |
 | **Q11** | Do door and frame prices need to vary by **size** (RAT-09), or is price by type × fire × finish enough? | Rates tables |
 | **Q12** | Drop the unused V1 fields `customerType` and `vpSize`? | Data model |
