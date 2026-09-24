@@ -2,7 +2,7 @@
 -- MAT code / supplier code / description / finish; partial words match ("9205" finds
 -- "TS.9205 EN2-5 SNP"). An exact MAT or supplier code match ranks first.
 -- $1 search text, $2 category id (NULL = all), $3 include inactive, $4 max rows
-SELECT p.id, p.mat_code, p.supplier_code, p.description, p.finish, p.unit, p.cost,
+SELECT p.id, p.version, p.mat_code, p.supplier_code, p.description, p.finish, p.unit, p.cost,
        p.active, p.verified, c.key AS category_key, c.label AS category_label
 FROM products p
 JOIN product_categories c ON c.id = p.category_id

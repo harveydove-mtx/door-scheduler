@@ -1,0 +1,47 @@
+# Door Scheduler V2: checks on every push and pull request. Touches no Firebase project.
+name: V2 checks
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  database:
+    name: Database (migrations, seed, 131 SQL checks)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - run: db/test.sh
+
+  app:
+    name: App (typecheck, pricing tests, build)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: app
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: app/package-lock.json
+      - run: npm ci
+      - run: npm run typecheck
+      - run: npm test
+      - run: npx vite build
+
+  dataconnect:
+    name: Data Connect (connector up to date, emulator operation tests)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+      - run: node dataconnect/build-connector.mjs --check
+      - run: npx --yes firebase-tools@15.31.0 setup:emulators:dataconnect
+      - run: dataconnect/test/run.sh

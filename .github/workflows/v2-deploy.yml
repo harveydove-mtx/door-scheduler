@@ -1,0 +1,122 @@
+# Door Scheduler V2: deploy to the NEW V2 Firebase project (never the live V1 project).
+#
+# Does nothing until the one-off setup in docs/v2-firebase-setup.md is done:
+#   - repository variable FIREBASE_PROJECT_ID_V2   (Settings > Secrets and variables > Actions > Variables)
+#   - repository secret   FIREBASE_SERVICE_ACCOUNT_V2 (the github-deployer JSON key)
+#   - app/.env.production  (the V2 web app config, committed)
+#
+# Each run: set up SQL roles -> apply new db/migrations (+ seed on a brand-new database)
+#           -> deploy Data Connect operations + the web app to Firebase Hosting.
+name: V2 deploy
+
+on:
+  push:
+    branches: [main, claude/nifty-hamilton-eptn9y]
+  workflow_dispatch:
+
+concurrency:
+  group: v2-deploy
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+env:
+  PROJECT_ID: ${{ vars.FIREBASE_PROJECT_ID_V2 }}
+  REGION: europe-west2
+  SQL_INSTANCE: door-scheduler-sql
+  SQL_DATABASE: doorscheduler
+  OWNER_ROLE: firebaseowner_doorscheduler_public
+  FIREBASE_TOOLS: firebase-tools@15.31.0
+  CLOUD_SQL_PROXY: v2.25.4
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Check the V2 project is set up
+        id: gate
+        env:
+          HAS_KEY: ${{ secrets.FIREBASE_SERVICE_ACCOUNT_V2 != '' }}
+        run: |
+          missing=""
+          [ -n "$PROJECT_ID" ] || missing="$missing\n  - repository variable FIREBASE_PROJECT_ID_V2"
+          [ "$HAS_KEY" = "true" ] || missing="$missing\n  - repository secret FIREBASE_SERVICE_ACCOUNT_V2"
+          [ -f app/.env.production ] || missing="$missing\n  - app/.env.production (V2 web app config)"
+          if [ -n "$missing" ]; then
+            printf "::notice::V2 deploy skipped: not set up yet. Missing:$missing\nSee docs/v2-firebase-setup.md\n"
+            echo "ready=false" >> "$GITHUB_OUTPUT"; exit 0
+          fi
+          # Safety: never deploy to the live V1 project, and the web config must be for this project
+          if [ "$PROJECT_ID" = "matrix-doorschedulequotation" ]; then
+            echo "::error::FIREBASE_PROJECT_ID_V2 points at the live V1 project. Refusing."; exit 1
+          fi
+          grep -qx "VITE_FIREBASE_PROJECT_ID=$PROJECT_ID" app/.env.production || {
+            echo "::error::app/.env.production is for a different project than $PROJECT_ID"; exit 1; }
+          echo "ready=true" >> "$GITHUB_OUTPUT"
+
+      - if: steps.gate.outputs.ready == 'true'
+        uses: google-github-actions/auth@v3
+        with:
+          credentials_json: ${{ secrets.FIREBASE_SERVICE_ACCOUNT_V2 }}
+
+      - if: steps.gate.outputs.ready == 'true'
+        uses: google-github-actions/setup-gcloud@v3
+
+      - if: steps.gate.outputs.ready == 'true'
+        uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: app/package-lock.json
+
+      - name: Build the web app
+        if: steps.gate.outputs.ready == 'true'
+        working-directory: app
+        run: |
+          npm ci
+          npm test
+          npm run build
+
+      - name: Check the connector matches db/queries
+        if: steps.gate.outputs.ready == 'true'
+        run: node dataconnect/build-connector.mjs --check
+
+      - name: Set up Data Connect SQL roles (safe to repeat)
+        if: steps.gate.outputs.ready == 'true'
+        run: npx --yes "$FIREBASE_TOOLS" dataconnect:sql:setup --project "$PROJECT_ID" --non-interactive
+
+      - name: Apply database migrations
+        if: steps.gate.outputs.ready == 'true'
+        run: |
+          set -euo pipefail
+          # A temporary Cloud SQL user (member of cloudsqlsuperuser) for this run only,
+          # the same approach the Firebase CLI uses. Tables are created as the Data Connect
+          # owner role (MIGRATE_ROLE) so Data Connect keeps full access.
+          USER="gh-migrator-${GITHUB_RUN_ID}"
+          PASS="$(openssl rand -hex 24)"
+          echo "::add-mask::$PASS"
+          echo "MIGRATOR_USER=$USER" >> "$GITHUB_ENV"
+          gcloud sql users create "$USER" --instance="$SQL_INSTANCE" --password="$PASS" --project="$PROJECT_ID" --quiet
+          curl -sSfL -o /tmp/cloud-sql-proxy \
+            "https://storage.googleapis.com/cloud-sql-connectors/cloud-sql-proxy/${CLOUD_SQL_PROXY}/cloud-sql-proxy.linux.amd64"
+          chmod +x /tmp/cloud-sql-proxy
+          /tmp/cloud-sql-proxy "${PROJECT_ID}:${REGION}:${SQL_INSTANCE}" --port 5433 > /tmp/proxy.log 2>&1 &
+          for _ in $(seq 1 30); do pg_isready -h 127.0.0.1 -p 5433 -q && break; sleep 1; done
+          export DATABASE_URL="postgresql://${USER}:${PASS}@127.0.0.1:5433/${SQL_DATABASE}?sslmode=disable"
+          psql "$DATABASE_URL" -X -q -v ON_ERROR_STOP=1 -c "CREATE EXTENSION IF NOT EXISTS pg_trgm"
+          MIGRATE_ROLE="$OWNER_ROLE" db/migrate.sh
+
+      - name: Remove the temporary database user
+        if: always() && env.MIGRATOR_USER != ''
+        run: gcloud sql users delete "$MIGRATOR_USER" --instance="$SQL_INSTANCE" --project="$PROJECT_ID" --quiet
+
+      - name: Deploy Data Connect + web app
+        if: steps.gate.outputs.ready == 'true'
+        run: npx --yes "$FIREBASE_TOOLS" deploy --only dataconnect,hosting --project "$PROJECT_ID" --non-interactive --force
+
+      - name: Summary
+        if: steps.gate.outputs.ready == 'true'
+        run: echo "### V2 deployed to https://${PROJECT_ID}.web.app" >> "$GITHUB_STEP_SUMMARY"

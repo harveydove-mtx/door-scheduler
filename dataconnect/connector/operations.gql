@@ -64,7 +64,7 @@ query MatCodeOwner($matCode: String!) @auth(expr: "auth.token.email.endsWith('@m
 query SearchProducts($search: String!, $categoryId: UUID, $includeInactive: Boolean!, $limit: Int!) @auth(expr: "auth.token.email.endsWith('@matrixhardware.co.uk')") {
   _select(
     sql: """
-    SELECT p.id, p.mat_code, p.supplier_code, p.description, p.finish, p.unit, p.cost,
+    SELECT p.id, p.version, p.mat_code, p.supplier_code, p.description, p.finish, p.unit, p.cost,
            p.active, p.verified, c.key AS category_key, c.label AS category_label
     FROM products p
     JOIN product_categories c ON c.id = p.category_id

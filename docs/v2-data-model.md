@@ -10,7 +10,7 @@ The database is **PostgreSQL**. It is built and tested **locally only**; nothing
 | Starting data (V1 default rates, lists, T&Cs) | [`db/seed.sql`](../db/seed.sql) |
 | Dev/test sample jobs (never live) | [`db/sample_data.sql`](../db/sample_data.sql) |
 | The queries the app will run | [`db/queries/`](../db/queries) |
-| Automated tests (108 checks) | [`db/tests/`](../db/tests), run with `db/test.sh` |
+| Automated tests (131 checks) | [`db/tests/`](../db/tests), run with `db/test.sh` |
 
 ---
 
@@ -147,15 +147,29 @@ The sample job's totals were worked out by hand from the V1 rates. The tests con
 | Job embeds all rates | Job lines keep their own price snapshot |
 | Random quote ref, not saved | `MH-YYYY-0001` sequence; V1 refs can be kept on migration |
 
-## 7. Moving to Firebase Data Connect (after sign-off)
+## 7. How Firebase Data Connect uses this database
 
-Data Connect builds the database from a GraphQL schema file (`schema.gql`). The plan:
-1. Write `dataconnect/schema/schema.gql` with the same tables and columns as `db/migrations`. The tests here stay the reference.
-2. Anything GraphQL can't express (the triggers, generated search columns, check constraints, `pg_trgm` indexes, views) is applied as extra SQL. The Data Connect schema check is set to its *compatible* mode so it accepts them. Views can also be declared with Data Connect's `@view`.
-3. Queries become Data Connect operations. Each save includes `version` in its filter, exactly as in `update_door_field.sql`.
-4. Verify on the local Data Connect emulator (which runs real Postgres) with the same scenarios as `db/tests`, **before** anything is deployed.
+**Decision (tested 2026-09-24): Data Connect runs our SQL; it does not own the tables.**
 
-This is done in the new V2 project only; the live V1 Firebase project is never touched.
+On the emulator, declaring a table as a Data Connect GraphQL type made Data Connect **rewrite the real table to match the type**. It dropped the Matrix-email check, the role check, the unique email and the column defaults, even with *compatible* validation. That would quietly undo rules we have tested. So:
+
+- **`db/migrations` is the only definition of the database.** It is applied by [`db/migrate.sh`](../db/migrate.sh): each file once, checksummed. Editing an applied file is refused; changes go in a new file. The seed is loaded only into a brand-new database.
+- **`dataconnect/schema/schema.gql` declares no tables.** Data Connect therefore never changes the schema. The emulator test checks this: it fails if the emulator ever tries a migration.
+- **Every operation is native SQL** (`_select`, `_executeReturning`). The SQL comes straight from `db/queries/*.sql`, the same files `db/test.sh` tests, via [`dataconnect/build-connector.mjs`](../dataconnect/build-connector.mjs). There is one copy of each query, and CI fails if the connector is out of date.
+- **Security:**
+  - Every operation requires a signed-in user with a `@matrixhardware.co.uk` email.
+  - `updated_by` / `created_by` always come from the signed-in user on the server, never from the browser.
+  - Saves are versioned (`WHERE id = … AND version = …`), so a stale save changes nothing and the app reloads.
+- **Permissions match Cloud SQL:**
+  - Tables are created as `firebaseowner_doorscheduler_public`, the role Data Connect's setup creates.
+  - Data Connect itself only has the writer role.
+  - [`dataconnect/test/run.sh`](../dataconnect/test/run.sh) reproduces this locally and runs every operation against it.
+- Things learned on the emulator:
+  - Data Connect wraps each SQL statement in a `WITH`, so a single statement can't update several tables. A save covering several tables is one small `UPDATE` per table, inside one transactional mutation.
+  - Optional values must be sent as `null`, not left out.
+  - The web SDK caches query results by default, so the app always reads from the server.
+
+This is done in the new V2 project only; the live V1 Firebase project is never touched. Setup steps: [v2-firebase-setup.md](v2-firebase-setup.md).
 
 ## 8. Still open (affects this model)
 
@@ -171,4 +185,4 @@ This is done in the new V2 project only; the live V1 Firebase project is never t
 db/test.sh                        # throwaway local Postgres, deleted afterwards
 DATABASE_URL=postgres://… db/test.sh   # or an existing EMPTY database
 ```
-Needs PostgreSQL 15+ installed (server + client). Output: `== 108 checks passed, 0 file(s) failed`.
+Needs PostgreSQL 15+ installed (server + client). Output: `== 131 checks passed, 0 file(s) failed`.
