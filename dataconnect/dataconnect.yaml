@@ -1,0 +1,16 @@
+# Firebase Data Connect service for Door Scheduler V2 (the NEW V2 Firebase project only).
+# These names must match what is created in the console: docs/v2-firebase-setup.md step 3.
+specVersion: "v1"
+serviceId: "door-scheduler"
+location: "europe-west2"
+schema:
+  source: "./schema"
+  datasource:
+    postgresql:
+      database: "doorscheduler"
+      cloudSql:
+        instanceId: "door-scheduler-sql"
+      # The database schema is owned by db/migrations (applied by db/migrate.sh), not by
+      # Data Connect. COMPATIBLE = Data Connect never removes anything it doesn't know about.
+      schemaValidation: "COMPATIBLE"
+connectorDirs: ["./connector"]

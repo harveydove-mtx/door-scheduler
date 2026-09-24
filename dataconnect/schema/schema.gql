@@ -1,0 +1,7 @@
+# Intentionally no @table types.
+#
+# The V2 database is defined by db/migrations/*.sql (applied by db/migrate.sh) and every
+# operation in ../connector uses native SQL (_select / _executeReturning) built from the
+# tested queries in db/queries. Declaring @table types here would make Data Connect rewrite
+# those tables to match (it drops constraints, defaults and triggers), so don't add any.
+# See docs/v2-data-model.md section 7.

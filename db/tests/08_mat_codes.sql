@@ -48,6 +48,10 @@ DROP TABLE t; CREATE TEMP TABLE t ON COMMIT DROP AS EXECUTE mat_code_table(NULL,
 SELECT pg_temp.ok(count(*) = 29 + 36 + 3 + 12 + 4 + 4 - 1, '"only missing" hides the one item with a code') FROM t;
 DROP TABLE t; CREATE TEMP TABLE t ON COMMIT DROP AS EXECUTE mat_code_table(NULL, false, 'mat-ts9205', false);
 SELECT pg_temp.ok(count(*) = 1, 'MAT code table can be searched by code') FROM t;
+DROP TABLE t; CREATE TEMP TABLE t ON COMMIT DROP AS EXECUTE mat_code_table(NULL, false, 'sasl  FD30 veneer', false);
+SELECT pg_temp.ok(count(*) = 1 AND min(item) LIKE 'Door SASL%FD30 / Veneer', 'search matches every word, in any order and case') FROM t;
+DROP TABLE t; CREATE TEMP TABLE t ON COMMIT DROP AS EXECUTE mat_code_table(NULL, false, '', false);
+SELECT pg_temp.ok(count(*) = 88, 'empty search = everything (all 88 items)') FROM t;
 
 -- Deleting a rate row frees its code
 UPDATE vp_rates SET mat_code = 'MAT-VP-NFR' WHERE fire_rating_code = 'NFR';

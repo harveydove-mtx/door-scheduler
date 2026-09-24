@@ -1,0 +1,2 @@
+connectorId: "door-scheduler"
+# No generated SDK: the app calls operations by name (app/src/data/dataconnect.ts).

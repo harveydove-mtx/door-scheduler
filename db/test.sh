@@ -27,10 +27,10 @@ fi
 
 PSQL=(psql "$DATABASE_URL" -X -q -v ON_ERROR_STOP=1 --no-psqlrc)
 
-echo "== migrations"
-for f in migrations/*.sql; do echo "   $f"; "${PSQL[@]}" -f "$f"; done
-echo "== seed"
-"${PSQL[@]}" -f seed.sql
+echo "== migrations + seed (db/migrate.sh, same as deploys)"
+DATABASE_URL="$DATABASE_URL" ./migrate.sh
+echo "== migrate.sh again: must apply nothing"
+DATABASE_URL="$DATABASE_URL" ./migrate.sh | grep -q "(0 migration(s) applied)" || { echo "   FAIL: second run applied migrations"; exit 1; }
 echo "== pricing-engine rate fixture matches seed"
 FIXTURE=../app/src/domain/fixtures/seedRateBook.json
 if ! diff -q <("${PSQL[@]}" -A -t -f export_ratebook.sql) "$FIXTURE" >/dev/null; then
@@ -42,9 +42,14 @@ echo "== sample data"
 "${PSQL[@]}" -f sample_data.sql
 
 echo "== tests"
+# PREPARE every query file under its name (generated ones too) for the tests to EXECUTE
+PREP="$(mktemp)"; trap 'rm -f "$PREP"; cleanup' EXIT
+for q in queries/*.sql queries/generated/*.sql; do
+  printf '\\set q `cat %s`\nPREPARE %s AS :q\n;\n' "$q" "$(basename "$q" .sql)" >> "$PREP"
+done
 pass=0; fail=0
 for f in tests/[0-9]*.sql; do
-  if out="$("${PSQL[@]}" -f tests/_helpers.sql -f "$f" 2>&1)"; then
+  if out="$("${PSQL[@]}" -f tests/_helpers.sql -f "$PREP" -f "$f" 2>&1)"; then
     n="$(grep -c 'ok - ' <<<"$out" || true)"; pass=$((pass + n))
     echo "   PASS $f ($n checks)"
   else
