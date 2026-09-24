@@ -1,0 +1,4 @@
+# Firebase CLI / emulator logs and caches
+*-debug.log
+.firebase/
+dataconnect/.dataconnect/
