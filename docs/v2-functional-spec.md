@@ -61,7 +61,8 @@ V1 keeps hardware as a list of `{type, cost}` per category. It builds quantities
 | RAT-02 | **Fire rating "S" variants** (FD30S, FD60S) price from their own row if one exists, and otherwise fall back to the base rating (FD30, FD60). | CHANGE (V1 bug: S rows never priced) |
 | RAT-03 | **Vision panel rates** per fire rating, with a glass description. | KEEP |
 | RAT-04 | **Frame rates**: form code × frame finish. Frame finishes are data (the V1 "custom frame finishes"). | KEEP |
-| RAT-05 | **Lining rates**: lining type × finish × **size band** (width and/or thickness). See open question Q1. | NEW |
+| RAT-05 | **Lining rates**: base price per door type × lining finish, like frames (*base price structure to confirm*). | NEW |
+| RAT-05a | **Lining depth**: the estimator enters the lining depth (mm) on each lining door. If the depth is **over the threshold** (an admin setting, value *to confirm*), the app **asks for an uplift cost £** for that line. A line over the threshold with no uplift is flagged as a warning and blocks the PDF quote until it is filled in. | NEW |
 | RAT-06 | **Architrave rates**: type → price (optionally per set or per door). | KEEP |
 | RAT-07 | **Over panel rates**: form code × fire rating × type (solid or glazed) × finish. | KEEP |
 | RAT-08 | Rate edits by different users on different rows never conflict. The same row edited at the same time prompts the user (see §9). | CHANGE |
@@ -98,7 +99,9 @@ V1 keeps hardware as a list of `{type, cost}` per category. It builds quantities
 | Vision panels | 0–8 | KEEP |
 | Door finish | primed, laminate, veneer, spray | KEEP |
 | **Surround** | **Frame** or **Lining** (or none) | NEW |
-| Frame finish / lining type and finish | from rates | KEEP / NEW |
+| Frame finish / lining finish | from rates | KEEP / NEW |
+| Lining depth (mm) | number; over the threshold → lining uplift £ required | NEW |
+| Lining uplift £ | number, asked for only when depth > threshold | NEW |
 | Architrave | from rates | KEEP |
 | Over panel | none, solid, glazed | KEEP |
 | Ironmongery | one product (and qty) per category column, **or** a full ironmongery set (§7) | CHANGE |
@@ -138,9 +141,11 @@ These are kept from V1:
 | WRN-02 | Rules become data, so admins can add or turn off rules without changing code. | NEW, *phase 2* |
 | WRN-03 | The PDF or export warns (without blocking) if any warnings are still open. | NEW |
 
-## 7. Ironmongery schedule (NEW)
+## 7. Ironmongery schedule (NEW, **phase 2: built after the doors side is complete**)
 
-This gives a full hardware specification per door, not just one item per category.
+**Agreed 2026-09-24:** ironmongery is built after all of the doors side is finished. Until then, doors keep V1-style hardware: **one product + qty per category column** on the door grid, priced from the catalogue (§3). The database stores door hardware as item rows (door, category, product, qty, cost snapshot), so phase 2 extends it without a rebuild.
+
+Phase 2 scope (for reference, not built yet) gives a full hardware specification per door, not just one item per category.
 
 | ID | Requirement | Status |
 |---|---|---|
@@ -149,7 +154,17 @@ This gives a full hardware specification per door, not just one item per categor
 | IRN-03 | **Grid view**: products as rows, one column per door, qty in the cells, with totals per product and per door. It matches the Matrix **BLANK SCHEDULE TEMPLATE** layout. | NEW |
 | IRN-04 | **Summary / order list**: total quantity per MAT code across the job, with cost and sell. Can be used to pick or order. | NEW |
 | IRN-05 | Export IRN-03 and IRN-04 to Excel in the Matrix template layout. | NEW |
-| IRN-06 | **Kickplate calculator**: kickplate width = door width minus an allowance (default 50 mm, *to confirm*), height from a list (150/200/250/300/400 mm, *to confirm*), sides 1 or 2 (push/pull). The cost is calculated per size from a rate (per m² or per size band, *to confirm*) or picked from a size-matched product. | NEW |
+| IRN-06 | *(phase 2)* **Kickplate calculator**: kickplate width = door width minus an allowance (default 50 mm, *to confirm*), height from a list (150/200/250/300/400 mm, *to confirm*), sides 1 or 2 (push/pull). The cost is calculated per size from a rate (per m² or per size band, *to confirm*) or picked from a size-matched product. | NEW |
+
+## 7a. Door screens (NEW, **structure only for now**)
+
+**Agreed 2026-09-24:** the database structure for **door screens** (glazed screens around or beside doorsets, e.g. side screens and fan-lights) is built now; they get their own pages and pricing later.
+
+| ID | Requirement | Status |
+|---|---|---|
+| SCR-01 | A job can have **screen lines** alongside door lines: qty, screen mark, location, width, height, fire rating, glazing description, frame finish, description, **manual unit cost**, sell override, comments. | NEW, structure only |
+| SCR-02 | Screen lines are included in job totals, using the same markup. | NEW, structure only |
+| SCR-03 | Screen rates and pricing rules are defined later. For now cost is entered by hand. | *later* |
 
 ## 8. Clients
 
@@ -199,8 +214,9 @@ This gives a full hardware specification per door, not just one item per categor
 2. **SQL database** (Postgres), built and tested **locally only**: schema, seed data from the V1 default rates, key queries, conflict handling and search tests. A data-model document for sign-off.
 3. **Pricing engine**: pure code with automated tests that prove V2 totals match V1 for the same inputs.
 4. **Only then Firebase:** a new, separate V2 project (Hosting + Auth + Data Connect/Postgres). The live V1 project is not touched.
-5. The screens, in the order: catalogue → schedule → linings → ironmongery → jobs/clients/dashboard → import/export → roles.
-6. **Later:** import V1 data (rates, jobs, folders) into V2, then cut over the domain.
+5. The doors side, in the order: catalogue → schedule (doors, frames, linings) → jobs/clients/dashboard → import/export → roles.
+6. **Phase 2:** ironmongery schedule (§7) and kickplate calculator, then door screens pricing (§7a).
+7. **Later:** import V1 data (rates, jobs, folders) into V2, then cut over the domain.
 
 ## 13. V1 bugs V2 must not repeat (acceptance criteria)
 
@@ -225,13 +241,13 @@ This gives a full hardware specification per door, not just one item per categor
 
 | # | Question | Why it matters |
 |---|---|---|
-| **Q1** | **Linings: how are they priced?** Per set by type × finish? By width band (e.g. up to 926 / 1026 mm) and/or thickness (e.g. 32 / 44 mm walls)? Do linings come with stops, architraves or intumescent built in? | Shapes the `lining_rates` table |
+| ~~Q1~~ | **Answered:** enter a lining depth; if it's over a threshold, ask for an uplift cost. *Still to confirm:* the **threshold value (mm)**, and whether the lining **base price** is per door type × finish like frames. | RAT-05/05a |
 | **Q2** | **Ironmongery schedule layout:** please attach the BLANK SCHEDULE TEMPLATE (xlsx) the export must match. | IRN-03/05 |
-| **Q3** | **Ironmongery sets:** do you want sets (IRN-02), or is per-door enough for now? | Big effect on the data model |
+| Q3 | *(deferred to phase 2)* **Ironmongery sets:** do you want sets (IRN-02), or is per-door enough for now? | Big effect on the data model |
 | **Q4** | **Kickplates:** priced per m², per size band, or as fixed products? What width allowance and heights? | IRN-06 |
 | **Q5** | **Markup or margin?** V1 applies *markup on cost* (22% default). Keep it, or quote by margin %? Allow a markup per line or per category? | Pricing engine |
 | **Q6** | **VAT:** show VAT and a gross total on the quote, or ex VAT only as now? | PDF |
-| **Q7** | **"A few more" modules:** which others are planned? (e.g. glazing, signage schedule, door furniture only, fire stopping, installation/labour, delivery charges) | Keeps the design open for them |
+| **Q7** | **"A few more" modules:** door screens are confirmed (§7a). Which others are planned? (e.g. glazing, signage schedule, door furniture only, fire stopping, installation/labour, delivery charges) | Keeps the design open for them |
 | **Q8** | **Roles:** who should be admins? Is a read-only Viewer role needed? | USR-02..04 |
 | **Q9** | **Sign-in method:** Microsoft 365 work accounts (best if Matrix uses M365), Google, or email + password? | USR-01 |
 | **Q10** | **MAT codes:** is there an existing MAT code list (e.g. an OGL export) to seed the catalogue from? What format is the code (e.g. `MAT12345`)? | CAT-01, seed data |
