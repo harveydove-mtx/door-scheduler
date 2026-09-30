@@ -1,0 +1,493 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Matrix Hardware — Product Drawings</title>
+<style>
+:root {
+  --primary: #2F5496; --primary-light: #D6E4F0; --red: #C00000;
+  --bg: #F5F6FA; --card: #FFFFFF; --border: #E0E4EA; --text: #1A1A2E; --text-muted: #6B7280;
+  --shadow: 0 1px 3px rgba(0,0,0,0.08), 0 1px 2px rgba(0,0,0,0.06);
+}
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body { font-family: 'Segoe UI', system-ui, -apple-system, sans-serif; background: var(--bg); color: var(--text); font-size: 14px; }
+.topbar { background: var(--primary); color: #fff; display: flex; align-items: center; gap: 14px; padding: 12px 20px; flex-wrap: wrap; }
+.topbar h1 { font-size: 16px; font-weight: 700; letter-spacing: .5px; margin-right: auto; }
+.topbar h1 span { display: block; font-size: 12px; font-weight: 400; opacity: .7; }
+button, .btn { font: inherit; cursor: pointer; border: 1px solid var(--border); background: #fff; color: var(--text); padding: 7px 14px; border-radius: 6px; font-weight: 500; }
+button:hover { background: var(--primary-light); }
+.topbar button { background: rgba(255,255,255,.15); color: #fff; border-color: rgba(255,255,255,.3); }
+.topbar button:hover { background: rgba(255,255,255,.28); }
+.layout { display: flex; gap: 18px; padding: 18px; align-items: flex-start; }
+.panel { width: 340px; flex-shrink: 0; background: var(--card); border-radius: 10px; box-shadow: var(--shadow); padding: 16px; max-height: calc(100vh - 100px); overflow-y: auto; position: sticky; top: 18px; }
+.panel h2 { font-size: 12px; text-transform: uppercase; letter-spacing: .8px; color: var(--text-muted); margin: 16px 0 8px; }
+.panel h2:first-child { margin-top: 0; }
+.field { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-bottom: 7px; }
+.field label { flex: 1; font-size: 13px; }
+.field input[type=number], .field input[type=text], .field select { width: 130px; padding: 6px 8px; border: 1px solid var(--border); border-radius: 5px; font: inherit; }
+.field input:focus, .field select:focus, td input:focus, td select:focus { outline: 2px solid var(--primary-light); border-color: var(--primary); }
+table.list { width: 100%; border-collapse: collapse; margin-bottom: 6px; }
+table.list th { font-size: 11px; text-align: left; color: var(--text-muted); font-weight: 600; padding: 2px 3px; }
+table.list td { padding: 2px 3px; }
+table.list td input[type=number], table.list td select { width: 100%; min-width: 0; padding: 4px 5px; border: 1px solid var(--border); border-radius: 4px; font: inherit; font-size: 12px; }
+table.list td input[type=checkbox] { display: block; margin: 0 auto; }
+.x { padding: 2px 8px; color: var(--red); }
+.hint { font-size: 12px; color: var(--text-muted); margin: 2px 0 8px; }
+.warn { background: #FFF2CC; border: 1px solid #BF8F00; color: #6b4e00; border-radius: 6px; padding: 8px 10px; font-size: 12.5px; margin-top: 10px; }
+.preview { flex: 1; min-width: 0; background: #fff; border-radius: 10px; box-shadow: var(--shadow); padding: 18px; display: flex; justify-content: center; }
+.preview svg { max-width: 100%; height: auto; max-height: calc(100vh - 130px); }
+@media (max-width: 860px) { .layout { flex-direction: column; } .panel { width: 100%; position: static; max-height: none; } }
+@media print {
+  @page { size: A4 portrait; margin: 10mm; }
+  body { background: #fff; }
+  .topbar, .panel { display: none; }
+  .layout { padding: 0; } .preview { box-shadow: none; padding: 0; }
+  .preview svg { max-height: 270mm; max-width: 100%; }
+}
+</style>
+</head>
+<body>
+<div class="topbar">
+  <h1>Matrix Hardware — Product Drawings<span>Enter dimensions, get a dimensioned line drawing</span></h1>
+  <select id="tplSel" style="padding:7px 10px;border-radius:6px;border:none;font:inherit"></select>
+  <button id="bSvg">Download SVG</button>
+  <button id="bPng">Download PNG</button>
+  <button id="bPrint">Print / PDF</button>
+  <button id="bSave">Save JSON</button>
+  <button id="bLoad">Load JSON</button>
+  <button id="bReset">Reset</button>
+  <input type="file" id="fileIn" accept=".json,application/json" hidden>
+</div>
+<div class="layout">
+  <div class="panel" id="panel"></div>
+  <div class="preview" id="preview"></div>
+</div>
+
+<script>
+/* ---------- helpers ---------- */
+const esc = s => String(s).replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+const num = x => { const n = parseFloat(x); return isFinite(n) ? n : 0; };
+const fmt = n => { const r = Math.round(Math.abs(n) * 10) / 10; return (Number.isInteger(r) ? r : r.toFixed(1)) + 'mm'; };
+const RED = '#e00000', OUT = 'stroke="#000" stroke-width="1.6" fill="#fff"';
+const HID = 'stroke="#000" stroke-width="1" stroke-dasharray="5 3" fill="none"';
+const CEN = 'stroke="#555" stroke-width=".8" stroke-dasharray="10 3 2 3" fill="none"';
+
+class Sv {
+  constructor() { this.o = []; }
+  add(s) { this.o.push(s); }
+  line(x1, y1, x2, y2, a) { this.add(`<line x1="${x1}" y1="${y1}" x2="${x2}" y2="${y2}" ${a || OUT}/>`); }
+  rect(x, y, w, h, a, r) { this.add(`<rect x="${x}" y="${y}" width="${Math.max(0, w)}" height="${Math.max(0, h)}" ${r ? `rx="${r}"` : ''} ${a || OUT}/>`); }
+  circle(cx, cy, r, a) { this.add(`<circle cx="${cx}" cy="${cy}" r="${Math.max(0, r)}" ${a || OUT}/>`); }
+  text(x, y, t, a) { this.add(`<text x="${x}" y="${y}" font-family="Arial, Helvetica, sans-serif" ${a || 'font-size="13"'}>${esc(t)}</text>`); }
+  // vertical dimension (arrow line at x from y1 to y2), label to the right ('r') or left ('l')
+  dimV(x, y1, y2, label, side = 'r') {
+    const a = Math.min(y1, y2), b = Math.max(y1, y2);
+    this.add(`<path d="M${x} ${a} L${x} ${b}" stroke="${RED}" stroke-width="1" marker-start="url(#ar)" marker-end="url(#ar)"/>`);
+    this.line(x - 20, a, x + 20, a, 'stroke="#777" stroke-width=".8"');
+    this.line(x - 20, b, x + 20, b, 'stroke="#777" stroke-width=".8"');
+    this.text(x + (side === 'r' ? 9 : -9), (a + b) / 2 + 4.5, label,
+      `font-size="13" font-weight="bold" text-anchor="${side === 'r' ? 'start' : 'end'}" paint-order="stroke" stroke="#fff" stroke-width="3"`);
+  }
+  // horizontal dimension; label above ('t') or below ('b')
+  dimH(y, x1, x2, label, side = 't') {
+    const a = Math.min(x1, x2), b = Math.max(x1, x2);
+    this.add(`<path d="M${a} ${y} L${b} ${y}" stroke="${RED}" stroke-width="1" marker-start="url(#ar)" marker-end="url(#ar)"/>`);
+    this.line(a, y - 20, a, y + 20, 'stroke="#777" stroke-width=".8"');
+    this.line(b, y - 20, b, y + 20, 'stroke="#777" stroke-width=".8"');
+    const short = b - a < 50; // too narrow for the label: push it to the right of the arrows
+    this.text(short ? b + 10 : (a + b) / 2, y + (short ? 4.5 : side === 't' ? -7 : 19), label,
+      `font-size="13" font-weight="bold" text-anchor="${short ? 'start' : 'middle'}" paint-order="stroke" stroke="#fff" stroke-width="3"`);
+  }
+  // chain of adjacent dimensions. px = pixel positions, mm = matching real values
+  chainV(x, px, mm, side) { for (let i = 0; i < px.length - 1; i++) this.dimV(x, px[i], px[i + 1], fmt(mm[i + 1] - mm[i]), side); }
+  chainH(y, px, mm, side) { for (let i = 0; i < px.length - 1; i++) this.dimH(y, px[i], px[i + 1], fmt(mm[i + 1] - mm[i]), side); }
+  keyhole(cx, cy, r) { // euro-profile cylinder cut-out
+    this.rect(cx - r * .55, cy, r * 1.1, r * 1.9, OUT);
+    this.circle(cx, cy, r, OUT);
+  }
+  titleBlock(w, y, v, extra) {
+    this.rect(10, y, w - 20, 74, 'stroke="#000" stroke-width="1.2" fill="none"');
+    this.line(10, y + 30, w - 10, y + 30, 'stroke="#000" stroke-width=".8"');
+    this.text(20, y + 21, v.title || 'Untitled', 'font-size="16" font-weight="bold"');
+    this.text(20, y + 50, `Code: ${v.code || '-'}    Finish: ${v.finish || '-'}`, 'font-size="12"');
+    this.text(20, y + 67, `Drawn by: ${v.drawnBy || '-'}    Date: ${v.date || '-'}    Scale: NTS    Units: mm`, 'font-size="12" fill="#444"');
+    if (extra) this.text(w - 20, y + 50, extra, 'font-size="11" fill="#444" text-anchor="end"');
+  }
+  finish(w, h) {
+    return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${w} ${h}" width="${w}" height="${h}">
+<defs><marker id="ar" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="9" markerHeight="9" markerUnits="userSpaceOnUse" orient="auto-start-reverse"><path d="M0,1 L10,5 L0,9 z" fill="${RED}"/></marker></defs>
+<rect width="${w}" height="${h}" fill="#fff"/>
+${this.o.join('\n')}
+</svg>`;
+  }
+}
+
+/* ---------- templates ---------- */
+const COMMON = [
+  { k: 'title', label: 'Drawing title', type: 'text', def: 'Multipoint Lock' },
+  { k: 'code', label: 'Product code', type: 'text', def: '' },
+  { k: 'finish', label: 'Finish / notes', type: 'text', def: '' },
+  { k: 'drawnBy', label: 'Drawn by', type: 'text', def: '' },
+  { k: 'date', label: 'Date', type: 'text', def: new Date().toISOString().slice(0, 10) },
+];
+
+const POINT_TYPES = { hook: { w: 14, h: 18 }, roller: { w: 16, h: 16, round: true }, latch: { w: 20, h: 24 }, deadbolt: { w: 30, h: 40 }, pin: { w: 10, h: 10 } };
+
+const TEMPLATES = {
+  multi: {
+    name: 'Multipoint lock',
+    title: 'Multipoint Lock',
+    fields: [
+      { sec: 'Faceplate' },
+      { k: 'length', label: 'Overall faceplate length', type: 'num', def: 1775 },
+      { k: 'topToDatum', label: 'Top of faceplate to datum (spindle)', type: 'num', def: 832 },
+      { k: 'forendW', label: 'Faceplate width (drawn)', type: 'num', def: 20 },
+      { sec: 'Gearbox case' },
+      { k: 'caseH', label: 'Case height', type: 'num', def: 200 },
+      { k: 'caseTop', label: 'Case top above datum', type: 'num', def: 85 },
+      { k: 'caseDepth', label: 'Case depth (from door edge)', type: 'num', def: 70 },
+      { k: 'backset', label: 'Backset (to spindle/cylinder)', type: 'num', def: 45 },
+      { k: 'cylOffset', label: 'Cylinder centre below datum (0 = none)', type: 'num', def: 92 },
+      { sec: 'Bolt / keep points' },
+      { hint: 'Offset is measured from the datum: positive = above, negative = below. Tick “Dim” to dimension a point in the left-hand chain. Outermost points are dimensioned from the datum automatically.' },
+      { k: 'points', type: 'list', cols: [
+          { k: 'type', label: 'Type', type: 'select', opts: Object.keys(POINT_TYPES) },
+          { k: 'off', label: 'Offset mm', type: 'num' },
+          { k: 'dim', label: 'Dim', type: 'check' }],
+        def: [
+          { type: 'hook', off: 810, dim: false }, { type: 'hook', off: 360, dim: true },
+          { type: 'latch', off: 45, dim: false }, { type: 'deadbolt', off: -25, dim: false },
+          { type: 'hook', off: -390, dim: true }, { type: 'hook', off: -920, dim: false }],
+        add: { type: 'hook', off: 0, dim: false } },
+    ],
+    draw(v) {
+      const L = num(v.length), warns = [];
+      if (L <= 0) throw new Error('Enter a positive faceplate length.');
+      const sv = new Sv(), s = Math.min(2, 880 / L), top = 70, plateL = 150;
+      const pw = Math.max(4, num(v.forendW) * s), plateR = plateL + pw;
+      const datumY = top + num(v.topToDatum) * s, yOf = o => datumY - o * s;
+      sv.rect(plateL, top, pw, L * s, OUT);
+
+      const pts = v.points.map(p => ({ ...p, off: num(p.off) }));
+      const maxOff = num(v.topToDatum), minOff = -(L - num(v.topToDatum));
+      pts.forEach(p => { if (p.off > maxOff || p.off < minOff) warns.push(`A ${p.type} at ${p.off}mm is outside the faceplate.`); });
+      pts.forEach(p => {
+        const t = POINT_TYPES[p.type] || POINT_TYPES.hook, w = Math.max(6, t.w * s), h = Math.max(6, t.h * s), cy = yOf(p.off);
+        if (t.round) sv.circle(plateL - w / 2, cy, h / 2, OUT);
+        else sv.rect(plateL - w, cy - h / 2, w, h, OUT);
+      });
+
+      // gearbox case
+      const cx0 = plateR, cx1 = Math.max(plateR + 6, plateL + num(v.caseDepth) * s);
+      const cTop = datumY - num(v.caseTop) * s, cH = num(v.caseH) * s;
+      sv.rect(cx0, cTop, cx1 - cx0, cH, OUT);
+      const sx = plateL + num(v.backset) * s, sq = Math.max(7, 9 * s);
+      sv.rect(sx - sq / 2, datumY - sq / 2, sq, sq, OUT);
+      const cyl = num(v.cylOffset);
+      if (cyl) sv.keyhole(sx, datumY + cyl * s, Math.max(5, 9.5 * s));
+      if (num(v.caseTop) > num(v.caseH) || num(v.caseTop) < 0) warns.push('Case top above datum should be between 0 and the case height.');
+
+      // left-hand chain (datum + ticked points)
+      const nodes = [{ off: 0 }, ...pts.filter(p => p.dim)].sort((a, b) => b.off - a.off);
+      if (nodes.length > 1) sv.chainV(plateL - 55, nodes.map(n => yOf(n.off)), nodes.map(n => -n.off), 'l');
+
+      // right-hand columns
+      const cA = cx1 + 22, cB = cA + 70, cC = cB + 70, cD = cC + 70;
+      if (cyl) sv.dimV(cA, datumY, datumY + cyl * s, fmt(cyl));
+      sv.dimV(cB, cTop, cTop + cH, fmt(num(v.caseH)));
+      const hi = Math.max(0, ...pts.map(p => p.off)), lo = Math.min(0, ...pts.map(p => p.off));
+      if (hi > 0) sv.dimV(cC, yOf(hi), datumY, fmt(hi));
+      if (lo < 0) sv.dimV(cC, datumY, yOf(lo), fmt(lo));
+      sv.dimV(cD, top, top + L * s, fmt(L));
+
+      const w = cD + 80, bottom = top + L * s + 45;
+      sv.titleBlock(w, bottom, v);
+      return { svg: sv.finish(w, bottom + 84), warns };
+    },
+  },
+
+  hinge: {
+    name: 'Hinge (butt)',
+    title: 'Butt Hinge',
+    fields: [
+      { sec: 'Hinge body' },
+      { k: 'H', label: 'Height', type: 'num', def: 102 },
+      { k: 'O', label: 'Open width (leaf to leaf)', type: 'num', def: 76 },
+      { k: 'K', label: 'Knuckle diameter', type: 'num', def: 13 },
+      { k: 't', label: 'Leaf thickness', type: 'num', def: 2.5 },
+      { k: 'knuckles', label: 'Number of knuckles', type: 'num', def: 5 },
+      { sec: 'Screw holes (per leaf)' },
+      { k: 'n', label: 'Number of holes', type: 'num', def: 3 },
+      { k: 'holeD', label: 'Hole diameter', type: 'num', def: 5 },
+      { k: 'margin', label: 'End margin (to first hole centre)', type: 'num', def: 20 },
+      { k: 'inset', label: 'Hole distance from leaf edge (0 = centred)', type: 'num', def: 0 },
+      { k: 'csk', label: 'Countersunk', type: 'select', opts: ['yes', 'no'], def: 'yes' },
+    ],
+    draw(v) {
+      const H = num(v.H), O = num(v.O), K = num(v.K), t = num(v.t), warns = [];
+      if (H <= 0 || O <= K || K <= 0) throw new Error('Open width must be larger than the knuckle diameter; height and knuckle must be positive.');
+      const sv = new Sv(), s = Math.min(3, 430 / H), x0 = 150, top = 90;
+      const lw = (O - K) / 2, n = Math.max(1, Math.round(num(v.n))), nk = Math.max(1, Math.round(num(v.knuckles)));
+      const xK0 = x0 + lw * s, xK1 = xK0 + K * s, xR = x0 + O * s, bot = top + H * s;
+      sv.rect(x0, top, lw * s, H * s, OUT);
+      sv.rect(xK1, top, lw * s, H * s, OUT);
+      for (let i = 0; i < nk; i++) // alternate knuckle shading shows which leaf each belongs to
+        sv.rect(xK0, top + (H / nk) * i * s, K * s, (H / nk) * s, `stroke="#000" stroke-width="1.6" fill="${i % 2 ? '#fff' : '#ececec'}"`);
+      sv.line((xK0 + xK1) / 2, top - 6, (xK0 + xK1) / 2, bot + 6, CEN);
+
+      const inset = num(v.inset) > 0 ? num(v.inset) : lw / 2, m = num(v.margin);
+      const hy = Array.from({ length: n }, (_, i) => n === 1 ? H / 2 : m + i * (H - 2 * m) / (n - 1));
+      if (n > 1 && m * 2 >= H) warns.push('End margin is too large for the hinge height.');
+      if (inset > lw) warns.push('Hole position is outside the leaf.');
+      [x0 + inset * s, xR - inset * s].forEach(hx => hy.forEach(y => {
+        if (v.csk === 'yes') sv.circle(hx, top + y * s, num(v.holeD) * 0.95 * s, 'stroke="#000" stroke-width="1" fill="none"');
+        sv.circle(hx, top + y * s, num(v.holeD) / 2 * s, OUT);
+      }));
+
+      sv.chainV(x0 - 50, [top, ...hy.map(y => top + y * s), bot], [0, ...hy, H], 'l');
+      sv.dimV(xR + 50, top, bot, fmt(H));
+      sv.dimH(top - 34, x0, xR, fmt(O));
+      sv.dimH(bot + 36, x0, x0 + inset * s, fmt(inset), 'b');
+      sv.text(x0, bot + 76, `${n} × Ø${num(v.holeD)}mm holes per leaf${v.csk === 'yes' ? ', countersunk' : ''}`, 'font-size="12" fill="#444"');
+
+      // plan view
+      const py = bot + 150, th = Math.max(3, t * s);
+      sv.text(x0, py - 40, 'PLAN (open flat)', 'font-size="11" fill="#666"');
+      sv.rect(x0, py - th / 2, O * s, th, OUT);
+      sv.circle((xK0 + xK1) / 2, py, K * s / 2, OUT);
+      sv.dimH(py + K * s / 2 + 32, xK0, xK1, 'Ø' + fmt(K), 'b');
+      sv.dimV(xR + 50, py - th / 2, py + th / 2, fmt(t));
+      const w = xR + 130, y = py + K * s / 2 + 76;
+      sv.titleBlock(w, y, v);
+      return { svg: sv.finish(w, y + 84), warns };
+    },
+  },
+
+  pull: {
+    name: 'Pull handle (bar)',
+    title: 'Pull Handle',
+    fields: [
+      { sec: 'Bar' },
+      { k: 'L', label: 'Overall length', type: 'num', def: 600 },
+      { k: 'D', label: 'Bar diameter', type: 'num', def: 32 },
+      { k: 'C', label: 'Fixing centres', type: 'num', def: 500 },
+      { k: 'P', label: 'Projection (door face to outside of bar)', type: 'num', def: 100 },
+      { sec: 'Posts and rosettes' },
+      { k: 'postD', label: 'Post diameter', type: 'num', def: 25 },
+      { k: 'baseD', label: 'Rosette / base diameter', type: 'num', def: 35 },
+      { k: 'baseT', label: 'Rosette thickness', type: 'num', def: 8 },
+    ],
+    draw(v) {
+      const L = num(v.L), D = num(v.D), C = num(v.C), P = num(v.P), postD = num(v.postD), baseD = num(v.baseD), baseT = num(v.baseT), warns = [];
+      if (L <= 0 || D <= 0 || P <= D) throw new Error('Length and diameter must be positive and projection must exceed the bar diameter.');
+      if (C > L) warns.push('Fixing centres are longer than the handle.');
+      const sv = new Sv(), s = Math.min(2.5, 700 / L), top = 70, bx = 170, bw = D * s;
+      sv.text(bx, top - 35, 'FRONT', 'font-size="11" text-anchor="middle" fill="#666"');
+      const c1 = top + (L - C) / 2 * s, c2 = c1 + C * s;
+      [c1, c2].forEach(cy => {
+        sv.circle(bx, cy, baseD / 2 * s, HID);
+        sv.line(bx - baseD / 2 * s - 8, cy, bx + baseD / 2 * s + 8, cy, CEN);
+        sv.line(bx, cy - baseD / 2 * s - 8, bx, cy + baseD / 2 * s + 8, CEN);
+      });
+      sv.rect(bx - bw / 2, top, bw, L * s, OUT, bw / 2);
+      sv.dimV(bx - bw / 2 - 60, c1, c2, fmt(C), 'l');
+      sv.dimV(bx + bw / 2 + 55, top, top + L * s, fmt(L));
+
+      // side view, aligned on the top fixing
+      const sx = bx + 160, cy = c1, barCx = sx + (P - D / 2) * s;
+      sv.text(sx + P * s / 2, top - 35, 'SIDE', 'font-size="11" text-anchor="middle" fill="#666"');
+      sv.line(sx, cy - baseD / 2 * s - 40, sx, cy + baseD / 2 * s + 40, 'stroke="#000" stroke-width="3"');
+      sv.rect(sx, cy - baseD / 2 * s, baseT * s, baseD * s, OUT);
+      sv.rect(sx + baseT * s, cy - postD / 2 * s, barCx - sx - baseT * s, postD * s, OUT);
+      sv.circle(barCx, cy, D / 2 * s, OUT);
+      sv.dimH(cy + baseD / 2 * s + 55, sx, sx + P * s, fmt(P), 'b');
+      sv.dimV(sx - 50, cy - baseD / 2 * s, cy + baseD / 2 * s, 'Ø' + fmt(baseD), 'l');
+      sv.dimV(sx + P * s + 45, cy - D / 2 * s, cy + D / 2 * s, 'Ø' + fmt(D));
+      if (baseT > 0) sv.dimH(cy - baseD / 2 * s - 26, sx, sx + baseT * s, fmt(baseT), 't');
+
+      const w = sx + P * s + 130, y = top + L * s + 40;
+      sv.titleBlock(w, y, v, `Post Ø${postD}mm`);
+      return { svg: sv.finish(w, y + 84), warns };
+    },
+  },
+
+  plate: {
+    name: 'Plate / escutcheon / backplate',
+    title: 'Backplate',
+    fields: [
+      { sec: 'Plate' },
+      { k: 'W', label: 'Width', type: 'num', def: 50 },
+      { k: 'H', label: 'Height', type: 'num', def: 200 },
+      { k: 'R', label: 'Corner radius', type: 'num', def: 5 },
+      { sec: 'Holes / cut-outs' },
+      { hint: 'X is measured from the left edge and Y from the bottom edge, to the hole centre. Tick “Dim” to add that hole to the dimension chains. Size = diameter, or side length for a square.' },
+      { k: 'holes', type: 'list', cols: [
+          { k: 'type', label: 'Type', type: 'select', opts: ['round', 'square', 'euro'] },
+          { k: 'x', label: 'X', type: 'num' }, { k: 'y', label: 'Y', type: 'num' },
+          { k: 'd', label: 'Size', type: 'num' }, { k: 'dim', label: 'Dim', type: 'check' }],
+        def: [
+          { type: 'square', x: 25, y: 150, d: 8, dim: true }, { type: 'euro', x: 25, y: 58, d: 17, dim: true },
+          { type: 'round', x: 25, y: 185, d: 5, dim: true }, { type: 'round', x: 25, y: 15, d: 5, dim: true }],
+        add: { type: 'round', x: 0, y: 0, d: 5, dim: true } },
+    ],
+    draw(v) {
+      const W = num(v.W), H = num(v.H), warns = [];
+      if (W <= 0 || H <= 0) throw new Error('Enter a positive width and height.');
+      const sv = new Sv(), s = Math.min(3, 600 / H, 300 / W), pl = 130, top = 60, pr = pl + W * s, bot = top + H * s;
+      sv.rect(pl, top, W * s, H * s, OUT, num(v.R) * s);
+      const hs = v.holes.map(h => ({ ...h, x: num(h.x), y: num(h.y), d: num(h.d) }));
+      const counts = {};
+      hs.forEach(h => {
+        if (h.x < 0 || h.x > W || h.y < 0 || h.y > H) warns.push(`A ${h.type} hole at (${h.x}, ${h.y}) is outside the plate.`);
+        const cx = pl + h.x * s, cy = bot - h.y * s, r = h.d / 2 * s;
+        if (h.type === 'square') sv.rect(cx - r, cy - r, 2 * r, 2 * r, OUT);
+        else if (h.type === 'euro') sv.keyhole(cx, cy, r);
+        else sv.circle(cx, cy, r, OUT);
+        const key = h.type === 'square' ? `□${h.d}mm square` : h.type === 'euro' ? 'Euro profile cylinder cut-out' : `Ø${h.d}mm`;
+        counts[key] = (counts[key] || 0) + 1;
+      });
+      const uniq = (a) => [...new Set(a.map(x => Math.round(x * 100) / 100))].sort((p, q) => p - q);
+      const ys = uniq([0, ...hs.filter(h => h.dim).map(h => h.y)]), xs = uniq([0, ...hs.filter(h => h.dim).map(h => h.x)]);
+      if (ys.length > 1) sv.chainV(pl - 55, ys.map(y => bot - y * s), ys, 'l');
+      if (xs.length > 1) sv.chainH(bot + 45, xs.map(x => pl + x * s), xs, 'b');
+      sv.dimH(bot + 95, pl, pr, fmt(W), 'b');
+      sv.dimV(pr + 55, top, bot, fmt(H));
+      const legend = Object.entries(counts).map(([k, n]) => `${n}× ${k}`).join(', ');
+      if (legend) sv.text(pl - 100, bot + 135, 'Holes: ' + legend, 'font-size="12" fill="#444"');
+      const w = Math.max(520, pr + 130), y = bot + 155;
+      sv.titleBlock(w, y, v);
+      return { svg: sv.finish(w, y + 84), warns };
+    },
+  },
+};
+
+/* ---------- state, persistence ---------- */
+const LS = {
+  get(k) { try { return localStorage.getItem(k); } catch (e) { return null; } },
+  set(k, v) { try { localStorage.setItem(k, v); } catch (e) {} },
+};
+const clone = o => JSON.parse(JSON.stringify(o));
+function defaults(key) {
+  const v = {};
+  [...COMMON, ...TEMPLATES[key].fields].forEach(f => { if (f.k) v[f.k] = clone(f.def ?? ''); });
+  v.title = TEMPLATES[key].title;
+  return v;
+}
+let cur = LS.get('mtxdraw:last'); if (!TEMPLATES[cur]) cur = 'multi';
+let state = {};
+function load(key) {
+  let v = defaults(key);
+  try { Object.assign(v, JSON.parse(LS.get('mtxdraw:' + key) || '{}')); } catch (e) {}
+  state = v;
+}
+function persist() { LS.set('mtxdraw:' + cur, JSON.stringify(state)); LS.set('mtxdraw:last', cur); }
+
+/* ---------- UI ---------- */
+const $ = id => document.getElementById(id);
+function inputFor(f, val, onChange) {
+  let el;
+  if (f.type === 'select') {
+    el = document.createElement('select');
+    f.opts.forEach(o => { const op = document.createElement('option'); op.value = op.textContent = o; el.appendChild(op); });
+    el.value = val; el.onchange = () => onChange(el.value);
+  } else if (f.type === 'check') {
+    el = document.createElement('input'); el.type = 'checkbox'; el.checked = !!val; el.onchange = () => onChange(el.checked);
+  } else {
+    el = document.createElement('input'); el.type = f.type === 'num' ? 'number' : 'text'; if (f.type === 'num') el.step = 'any';
+    el.value = val; el.oninput = () => onChange(el.value);
+  }
+  return el;
+}
+function buildPanel() {
+  const p = $('panel'); p.innerHTML = '';
+  const T = TEMPLATES[cur];
+  const addFields = (fields) => fields.forEach(f => {
+    if (f.sec) { const h = document.createElement('h2'); h.textContent = f.sec; p.appendChild(h); return; }
+    if (f.hint) { const d = document.createElement('div'); d.className = 'hint'; d.textContent = f.hint; p.appendChild(d); return; }
+    if (f.type === 'list') return p.appendChild(listEditor(f));
+    const row = document.createElement('div'); row.className = 'field';
+    const lab = document.createElement('label'); lab.textContent = f.label; row.appendChild(lab);
+    row.appendChild(inputFor(f, state[f.k], val => { state[f.k] = val; render(); }));
+    p.appendChild(row);
+  });
+  addFields([{ sec: 'Title block' }, ...COMMON]);
+  addFields(T.fields);
+  const w = document.createElement('div'); w.id = 'warns'; p.appendChild(w);
+}
+function listEditor(f) {
+  const wrap = document.createElement('div'), tbl = document.createElement('table'); tbl.className = 'list';
+  const draw = () => {
+    tbl.innerHTML = '<tr>' + f.cols.map(c => `<th>${c.label}</th>`).join('') + '<th></th></tr>';
+    state[f.k].forEach((row, i) => {
+      const tr = document.createElement('tr');
+      f.cols.forEach(c => {
+        const td = document.createElement('td');
+        td.appendChild(inputFor(c, row[c.k], val => { row[c.k] = val; render(); }));
+        tr.appendChild(td);
+      });
+      const td = document.createElement('td'), x = document.createElement('button');
+      x.className = 'x'; x.textContent = '×'; x.onclick = () => { state[f.k].splice(i, 1); draw(); render(); };
+      td.appendChild(x); tr.appendChild(td); tbl.appendChild(tr);
+    });
+  };
+  draw();
+  const add = document.createElement('button'); add.textContent = '+ Add row';
+  add.onclick = () => { state[f.k].push(clone(f.add)); draw(); render(); };
+  wrap.append(tbl, add);
+  return wrap;
+}
+
+let lastSvg = '';
+function render() {
+  persist();
+  const prev = $('preview'), wEl = $('warns');
+  try {
+    const r = TEMPLATES[cur].draw(state);
+    lastSvg = r.svg; prev.innerHTML = r.svg;
+    if (wEl) wEl.innerHTML = r.warns.length ? `<div class="warn">${r.warns.map(esc).join('<br>')}</div>` : '';
+  } catch (e) {
+    lastSvg = ''; prev.innerHTML = `<div class="warn" style="align-self:flex-start">${esc(e.message)}</div>`;
+    if (wEl) wEl.innerHTML = '';
+  }
+}
+function switchTo(key) { cur = key; load(key); $('tplSel').value = key; buildPanel(); render(); }
+
+/* ---------- export ---------- */
+const slug = () => ((state.code || state.title || 'drawing') + '').trim().replace(/[^a-z0-9]+/gi, '-').replace(/^-|-$/g, '').toLowerCase() || 'drawing';
+function download(name, blob) {
+  const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = name;
+  document.body.appendChild(a); a.click(); a.remove(); setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+}
+$('bSvg').onclick = () => { if (lastSvg) download(slug() + '.svg', new Blob([lastSvg], { type: 'image/svg+xml' })); };
+$('bPng').onclick = () => {
+  if (!lastSvg) return;
+  const svg = $('preview').querySelector('svg'), w = +svg.getAttribute('width'), h = +svg.getAttribute('height'), img = new Image();
+  img.onload = () => {
+    const c = document.createElement('canvas'); c.width = w * 2; c.height = h * 2;
+    const g = c.getContext('2d'); g.fillStyle = '#fff'; g.fillRect(0, 0, c.width, c.height); g.drawImage(img, 0, 0, c.width, c.height);
+    c.toBlob(b => download(slug() + '.png', b), 'image/png');
+  };
+  img.src = 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(lastSvg);
+};
+$('bPrint').onclick = () => window.print();
+$('bSave').onclick = () => download(slug() + '.json', new Blob([JSON.stringify({ template: cur, values: state }, null, 1)], { type: 'application/json' }));
+$('bLoad').onclick = () => $('fileIn').click();
+$('fileIn').onchange = e => {
+  const f = e.target.files[0]; if (!f) return;
+  f.text().then(t => {
+    const d = JSON.parse(t);
+    if (!TEMPLATES[d.template]) throw new Error('Unknown template');
+    cur = d.template; state = Object.assign(defaults(cur), d.values);
+    $('tplSel').value = cur; buildPanel(); render();
+  }).catch(err => alert('Could not load file: ' + err.message)).finally(() => { e.target.value = ''; });
+};
+$('bReset').onclick = () => { if (confirm('Reset this drawing to its default dimensions?')) { state = defaults(cur); buildPanel(); render(); } };
+
+/* ---------- init ---------- */
+Object.entries(TEMPLATES).forEach(([k, t]) => { const o = document.createElement('option'); o.value = k; o.textContent = t.name; $('tplSel').appendChild(o); });
+$('tplSel').onchange = e => switchTo(e.target.value);
+switchTo(cur);
+</script>
+</body>
+</html>
