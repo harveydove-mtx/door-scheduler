@@ -132,7 +132,28 @@ const COMMON = [
   { k: 'date', label: 'Date', type: 'text', def: new Date().toISOString().slice(0, 10) },
 ];
 
-const POINT_TYPES = { hook: { w: 14, h: 18 }, roller: { w: 16, h: 16, round: true }, latch: { w: 20, h: 24 }, deadbolt: { w: 30, h: 40 }, pin: { w: 10, h: 10 } };
+// Side-profile symbols. Coordinates are (u, v): u = distance out from the faceplate, v = vertical (down is +).
+// w/h are real mm sizes; the drawing multiplies them by the "symbol size" field so they stay legible on a long faceplate.
+const SHAPES = {
+  hook:       { w: 16, h: 22, poly: (w, h) => { const t = h * .35, b = h * .25; return [[0, -h/2], [w, -h/2], [w, h/2 - b], [w - b, h/2], [w * .55, h/2], [w * .55, -h/2 + t], [0, -h/2 + t]]; } },
+  'hook-up':  { w: 16, h: 22, flip: true, poly: (w, h) => SHAPES.hook.poly(w, h) },
+  roller:     { w: 20, h: 16, custom: true },
+  mushroom:   { w: 16, h: 18, poly: (w, h) => { const st = h * .16, c = h * .12, u = w * .5; return [[0, -st], [u, -st], [u, -h/2 + c], [u + c, -h/2], [w - c, -h/2], [w, -h/2 + c], [w, h/2 - c], [w - c, h/2], [u + c, h/2], [u, h/2 - c], [u, st], [0, st]]; } },
+  pin:        { w: 14, h: 12, poly: (w, h) => { const a = h / 2, c = h * .22; return [[0, -a], [w - c, -a], [w, -a + c], [w, a - c], [w - c, a], [0, a]]; } },
+  latch:      { w: 22, h: 26, poly: (w, h) => [[0, -h/2], [w * .72, -h/2], [w, -h/2 + h * .38], [w, h/2], [0, h/2]] },
+  deadbolt:   { w: 28, h: 34, poly: (w, h) => { const c = h * .12; return [[0, -h/2], [w - c, -h/2], [w, -h/2 + c], [w, h/2 - c], [w - c, h/2], [0, h/2]]; } },
+};
+function drawPoint(sv, plateL, cy, type, s, k) {
+  const sh = SHAPES[type] || SHAPES.hook, w = Math.max(12, sh.w * s * k), h = Math.max(12, sh.h * s * k);
+  const X = u => +(plateL - u).toFixed(2), Y = v => +(cy + (sh.flip ? -v : v)).toFixed(2);
+  const poly = pts => sv.add(`<polygon points="${pts.map(([u, v]) => X(u) + ',' + Y(v)).join(' ')}" ${OUT} stroke-linejoin="round"/>`);
+  if (sh.custom) { // roller: short stem carrying a wheel with its axle
+    const st = h * .18, r = h / 2, cu = w - r;
+    poly([[0, -st], [cu, -st], [cu, st], [0, st]]);
+    sv.circle(X(cu), cy, r, OUT);
+    sv.circle(X(cu), cy, Math.max(1.5, r * .22), 'fill="#000" stroke="none"');
+  } else poly(sh.poly(w, h));
+}
 
 const TEMPLATES = {
   multi: {
@@ -149,10 +170,19 @@ const TEMPLATES = {
       { k: 'caseDepth', label: 'Case depth (from door edge)', type: 'num', def: 70 },
       { k: 'backset', label: 'Backset (to spindle/cylinder)', type: 'num', def: 45 },
       { k: 'cylOffset', label: 'Cylinder centre below datum (0 = none)', type: 'num', def: 92 },
+      { sec: 'Spindles' },
+      { hint: 'Add one row per spindle. Offset is from the datum: positive = above, negative = below (the first spindle is normally 0). Tick “Dim” to dimension it from the datum on the right.' },
+      { k: 'spindles', type: 'list', cols: [
+          { k: 'off', label: 'Offset mm', type: 'num' },
+          { k: 'size', label: 'Square mm', type: 'num' },
+          { k: 'dim', label: 'Dim', type: 'check' }],
+        def: [{ off: 0, size: 8, dim: false }],
+        add: { off: 0, size: 8, dim: true } },
       { sec: 'Bolt / keep points' },
       { hint: 'Offset is measured from the datum: positive = above, negative = below. Tick “Dim” to dimension a point in the left-hand chain. Outermost points are dimensioned from the datum automatically.' },
+      { k: 'ptScale', label: 'Symbol size (drawing multiplier)', type: 'num', def: 1.6 },
       { k: 'points', type: 'list', cols: [
-          { k: 'type', label: 'Type', type: 'select', opts: Object.keys(POINT_TYPES) },
+          { k: 'type', label: 'Type', type: 'select', opts: Object.keys(SHAPES) },
           { k: 'off', label: 'Offset mm', type: 'num' },
           { k: 'dim', label: 'Dim', type: 'check' }],
         def: [
@@ -172,18 +202,20 @@ const TEMPLATES = {
       const pts = v.points.map(p => ({ ...p, off: num(p.off) }));
       const maxOff = num(v.topToDatum), minOff = -(L - num(v.topToDatum));
       pts.forEach(p => { if (p.off > maxOff || p.off < minOff) warns.push(`A ${p.type} at ${p.off}mm is outside the faceplate.`); });
-      pts.forEach(p => {
-        const t = POINT_TYPES[p.type] || POINT_TYPES.hook, w = Math.max(6, t.w * s), h = Math.max(6, t.h * s), cy = yOf(p.off);
-        if (t.round) sv.circle(plateL - w / 2, cy, h / 2, OUT);
-        else sv.rect(plateL - w, cy - h / 2, w, h, OUT);
-      });
+      const k = num(v.ptScale) > 0 ? num(v.ptScale) : 1;
+      pts.forEach(p => drawPoint(sv, plateL, yOf(p.off), p.type, s, k));
 
       // gearbox case
       const cx0 = plateR, cx1 = Math.max(plateR + 6, plateL + num(v.caseDepth) * s);
       const cTop = datumY - num(v.caseTop) * s, cH = num(v.caseH) * s;
       sv.rect(cx0, cTop, cx1 - cx0, cH, OUT);
-      const sx = plateL + num(v.backset) * s, sq = Math.max(7, 9 * s);
-      sv.rect(sx - sq / 2, datumY - sq / 2, sq, sq, OUT);
+      const sx = plateL + num(v.backset) * s;
+      const spins = v.spindles.map(sp => ({ ...sp, off: num(sp.off), size: num(sp.size) || 8 }));
+      spins.forEach(sp => {
+        const q = Math.max(7, sp.size * s * 1.1), cy = yOf(sp.off);
+        sv.rect(sx - q / 2, cy - q / 2, q, q, OUT);
+        if (sp.off > num(v.caseTop) || sp.off < num(v.caseTop) - num(v.caseH)) warns.push(`A spindle at ${sp.off}mm is outside the case.`);
+      });
       const cyl = num(v.cylOffset);
       if (cyl) sv.keyhole(sx, datumY + cyl * s, Math.max(5, 9.5 * s));
       if (num(v.caseTop) > num(v.caseH) || num(v.caseTop) < 0) warns.push('Case top above datum should be between 0 and the case height.');
@@ -194,7 +226,10 @@ const TEMPLATES = {
 
       // right-hand columns
       const cA = cx1 + 22, cB = cA + 70, cC = cB + 70, cD = cC + 70;
-      if (cyl) sv.dimV(cA, datumY, datumY + cyl * s, fmt(cyl));
+      const rn = [{ off: 0 }, ...spins.filter(sp => sp.dim && sp.off !== 0)];
+      if (cyl) rn.push({ off: -cyl });
+      rn.sort((a, b) => b.off - a.off);
+      if (rn.length > 1) sv.chainV(cA, rn.map(n => yOf(n.off)), rn.map(n => -n.off), 'r');
       sv.dimV(cB, cTop, cTop + cH, fmt(num(v.caseH)));
       const hi = Math.max(0, ...pts.map(p => p.off)), lo = Math.min(0, ...pts.map(p => p.off));
       if (hi > 0) sv.dimV(cC, yOf(hi), datumY, fmt(hi));
