@@ -27,11 +27,12 @@ button:hover { background: var(--primary-light); }
 .field label { flex: 1; font-size: 13px; }
 .field input[type=number], .field input[type=text], .field select { width: 130px; padding: 6px 8px; border: 1px solid var(--border); border-radius: 5px; font: inherit; }
 .field input:focus, .field select:focus, td input:focus, td select:focus { outline: 2px solid var(--primary-light); border-color: var(--primary); }
-table.list { width: 100%; border-collapse: collapse; margin-bottom: 6px; }
-table.list th { font-size: 11px; text-align: left; color: var(--text-muted); font-weight: 600; padding: 2px 3px; }
-table.list td { padding: 2px 3px; }
-table.list td input[type=number], table.list td select { width: 100%; min-width: 0; padding: 4px 5px; border: 1px solid var(--border); border-radius: 4px; font: inherit; font-size: 12px; }
-table.list td input[type=checkbox] { display: block; margin: 0 auto; }
+.row { position: relative; display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 6px; padding: 10px 8px 8px; border: 1px solid var(--border); border-radius: 6px; margin-bottom: 6px; }
+.row .c { display: flex; flex-direction: column; gap: 2px; min-width: 0; font-size: 10.5px; color: var(--text-muted); }
+.row .c.wide { grid-column: span 2; }
+.row input[type=number], .row select { width: 100%; min-width: 0; padding: 4px 5px; border: 1px solid var(--border); border-radius: 4px; font: inherit; font-size: 12px; background: var(--field, #fff); color: var(--text); }
+.row input[type=checkbox] { width: 16px; height: 16px; margin: 5px 0 0 2px; }
+.row .x { position: absolute; top: -9px; right: -6px; width: 20px; height: 20px; padding: 0; line-height: 1; border-radius: 50%; background: var(--card, #fff); }
 .x { padding: 2px 8px; color: var(--red); }
 .hint { font-size: 12px; color: var(--text-muted); margin: 2px 0 8px; }
 .warn { background: #FFF2CC; border: 1px solid #BF8F00; color: #6b4e00; border-radius: 6px; padding: 8px 10px; font-size: 12.5px; margin-top: 10px; }
@@ -134,20 +135,19 @@ const COMMON = [
 ];
 
 // Side-profile symbols. Coordinates are (u, v): u = distance out from the faceplate, v = vertical (down is +).
-// w/h are real mm sizes; the drawing multiplies them by the "symbol size" field so they stay legible on a long faceplate.
+// w = how far the part sticks out, h = its height, both in real mm (shown at least 12px so they stay visible on a long faceplate).
 const SHAPES = {
-  hook:       { w: 16, h: 22, poly: (w, h) => { const t = h * .35, b = h * .25; return [[0, -h/2], [w, -h/2], [w, h/2 - b], [w - b, h/2], [w * .55, h/2], [w * .55, -h/2 + t], [0, -h/2 + t]]; } },
-  'hook-up':  { w: 16, h: 22, flip: true, poly: (w, h) => SHAPES.hook.poly(w, h) },
+  hook:       { w: 23, h: 22, path: (w, h) => { const t = w * .5, th = h * .42; return [['M', [0, -h/2]], ['Q', [w, -h/2], [w, h/2]], ['L', [w - t, h/2]], ['Q', [w - t, -h/2 + th], [0, -h/2 + th]], ['Z']]; } },
+  'hook-up':  { w: 23, h: 22, flip: true, path: (w, h) => SHAPES.hook.path(w, h) },
   roller:     { w: 20, h: 16, custom: true },
   mushroom:   { w: 16, h: 18, poly: (w, h) => { const st = h * .16, c = h * .12, u = w * .5; return [[0, -st], [u, -st], [u, -h/2 + c], [u + c, -h/2], [w - c, -h/2], [w, -h/2 + c], [w, h/2 - c], [w - c, h/2], [u + c, h/2], [u, h/2 - c], [u, st], [0, st]]; } },
   pin:        { w: 14, h: 12, poly: (w, h) => { const a = h / 2, c = h * .22; return [[0, -a], [w - c, -a], [w, -a + c], [w, a - c], [w - c, a], [0, a]]; } },
   latch:      { w: 22, h: 26, poly: (w, h) => [[0, -h/2], [w * .72, -h/2], [w, -h/2 + h * .38], [w, h/2], [0, h/2]] },
-  claw:       { w: 23, h: 22, path: (w, h) => { const t = w * .5, th = h * .42; return [['M', [0, -h/2]], ['Q', [w, -h/2], [w, h/2]], ['L', [w - t, h/2]], ['Q', [w - t, -h/2 + th], [0, -h/2 + th]], ['Z']]; } },
-  'claw-up':  { w: 23, h: 22, flip: true, path: (w, h) => SHAPES.claw.path(w, h) },
   deadbolt:   { w: 28, h: 34, poly: (w, h) => { const c = h * .12; return [[0, -h/2], [w - c, -h/2], [w, -h/2 + c], [w, h/2 - c], [w - c, h/2], [0, h/2]]; } },
 };
-function drawPoint(sv, plateL, cy, type, s, k, wMm, hMm) {
-  const sh = SHAPES[type] || SHAPES.hook, w = Math.max(12, (wMm || sh.w) * s * k), h = Math.max(12, (hMm || sh.h) * s * k);
+// Draws one locking part out of the faceplate's left face; returns its drawn size in px.
+function drawPoint(sv, plateL, cy, type, s, wMm, hMm) {
+  const sh = SHAPES[type] || SHAPES.hook, w = Math.max(12, wMm * s), h = Math.max(12, hMm * s);
   const X = u => +(plateL - u).toFixed(2), Y = v => +(cy + (sh.flip ? -v : v)).toFixed(2);
   const poly = pts => sv.add(`<polygon points="${pts.map(([u, v]) => X(u) + ',' + Y(v)).join(' ')}" ${OUT} stroke-linejoin="round"/>`);
   if (sh.path) {
@@ -159,6 +159,7 @@ function drawPoint(sv, plateL, cy, type, s, k, wMm, hMm) {
     sv.circle(X(cu), cy, r, OUT);
     sv.circle(X(cu), cy, Math.max(1.5, r * .22), 'fill="#000" stroke="none"');
   } else poly(sh.poly(w, h));
+  return { w, h };
 }
 
 const TEMPLATES = {
@@ -167,103 +168,98 @@ const TEMPLATES = {
     title: 'Multipoint Lock',
     fields: [
       { sec: 'Faceplate' },
-      { k: 'length', label: 'Overall faceplate length', type: 'num', def: 1775 },
-      { k: 'topToDatum', label: 'Top of faceplate to datum (spindle)', type: 'num', def: 832 },
-      { k: 'lengthAlt', label: 'Alternative overall length (0 = none)', type: 'num', def: 0 },
+      { k: 'length', label: 'Overall faceplate length', type: 'num', def: 1770 },
+      { k: 'lengthAlt', label: 'Alternative overall length (0 = none)', type: 'num', def: 2100 },
+      { k: 'topToDatum', label: 'Top of faceplate to datum', type: 'num', def: 785 },
       { k: 'forendW', label: 'Faceplate width (drawn)', type: 'num', def: 20 },
+      { hint: 'The datum is the reference line that locking points are measured from (offsets are positive above it, negative below).' },
       { sec: 'Gearbox case' },
-      { k: 'caseH', label: 'Case height', type: 'num', def: 200 },
-      { k: 'caseTop', label: 'Case top above datum', type: 'num', def: 85 },
+      { k: 'caseH', label: 'Case height', type: 'num', def: 185 },
+      { k: 'caseTop', label: 'Case top above datum', type: 'num', def: 92 },
       { k: 'caseDepth', label: 'Case depth (from door edge)', type: 'num', def: 70 },
       { k: 'backset', label: 'Backset (to spindle/cylinder)', type: 'num', def: 45 },
-      { k: 'cylOffset', label: 'Cylinder centre below datum (0 = none)', type: 'num', def: 92 },
+      { k: 'cyl', label: 'Show cylinder hole', type: 'select', opts: ['yes', 'no'], def: 'yes' },
+      { k: 'cylOffset', label: 'Cylinder centre below datum', type: 'num', def: 92 },
       { sec: 'Spindles' },
-      { hint: 'Add one row per spindle. Offset is from the datum: positive = above, negative = below (the first spindle is normally 0). Tick “Dim” to dimension it from the datum on the right.' },
+      { hint: 'Each spindle is measured from the cylinder hole centre: positive = above it, negative = below. Tick “Dim” to dimension it from the cylinder.' },
       { k: 'spindles', type: 'list', cols: [
-          { k: 'off', label: 'Offset mm', type: 'num' },
-          { k: 'size', label: 'Square mm', type: 'num' },
+          { k: 'off', label: 'From cyl.', type: 'num' },
+          { k: 'size', label: 'Square', type: 'num' },
           { k: 'dim', label: 'Dim', type: 'check' }],
-        def: [{ off: 0, size: 8, dim: false }],
+        def: [{ off: 92, size: 8, dim: true }],
         add: { off: 0, size: 8, dim: true } },
-      { sec: 'Hook boxes' },
-      { hint: 'A box inside the door edge with a hook bolt out of the front. Offset is the box centre from the datum (positive = above). Height and depth are the box; Hook is how far the hook sticks out. Tick “Dim” to show its dimensions.' },
-      { k: 'boxes', type: 'list', cols: [
-          { k: 'off', label: 'Offset', type: 'num' }, { k: 'bh', label: 'Height', type: 'num' },
-          { k: 'bd', label: 'Depth', type: 'num' }, { k: 'proj', label: 'Hook', type: 'num' },
-          { k: 'dir', label: 'Hook', type: 'select', opts: ['down', 'up'] }, { k: 'dim', label: 'Dim', type: 'check' }],
-        def: [],
-        add: { off: 720, bh: 113, bd: 45, proj: 23, dir: 'down', dim: true } },
-      { sec: 'Bolt / keep points' },
-      { hint: 'Offset is measured from the datum: positive = above, negative = below. Tick “Dim” to dimension a point in the left-hand chain. Outermost points are dimensioned from the datum automatically.' },
-      { k: 'ptScale', label: 'Symbol size (drawing multiplier)', type: 'num', def: 1.6 },
+      { sec: 'Locking points' },
+      { hint: 'Offset = centre of the part from the datum. Out = how far it sticks out of the faceplate and Height = its height (0 = standard size). Box H and Box D draw a box behind the faceplate (0 = no box). Chain adds it to the left-hand offset chain; Size dims shows its out, height and box dimensions.' },
       { k: 'points', type: 'list', cols: [
-          { k: 'type', label: 'Type', type: 'select', opts: Object.keys(SHAPES).filter(k => !k.startsWith('claw')) },
-          { k: 'off', label: 'Offset mm', type: 'num' },
-          { k: 'dim', label: 'Dim', type: 'check' }],
+          { k: 'type', label: 'Type', type: 'select', opts: Object.keys(SHAPES), wide: true },
+          { k: 'off', label: 'Offset', type: 'num' }, { k: 'proj', label: 'Out', type: 'num' },
+          { k: 'h', label: 'Height', type: 'num' }, { k: 'bh', label: 'Box H', type: 'num' },
+          { k: 'bd', label: 'Box D', type: 'num' }, { k: 'chain', label: 'Chain', type: 'check' },
+          { k: 'sd', label: 'Size dims', type: 'check' }],
         def: [
-          { type: 'hook', off: 810, dim: false }, { type: 'hook', off: 360, dim: true },
-          { type: 'latch', off: 45, dim: false }, { type: 'deadbolt', off: -25, dim: false },
-          { type: 'hook', off: -390, dim: true }, { type: 'hook', off: -920, dim: false }],
-        add: { type: 'hook', off: 0, dim: false } },
+          { type: 'hook', off: 720, proj: 23, h: 0, bh: 113, bd: 45, chain: false, sd: true },
+          { type: 'latch', off: 60, proj: 20, h: 10, bh: 0, bd: 0, chain: false, sd: true },
+          { type: 'deadbolt', off: -35, proj: 20, h: 30, bh: 0, bd: 0, chain: false, sd: false },
+          { type: 'hook-up', off: -770, proj: 23, h: 0, bh: 113, bd: 45, chain: false, sd: false }],
+        add: { type: 'hook', off: 0, proj: 0, h: 0, bh: 0, bd: 0, chain: false, sd: true } },
     ],
     draw(v) {
       const L = num(v.length), warns = [];
       if (L <= 0) throw new Error('Enter a positive faceplate length.');
-      const sv = new Sv(), s = Math.min(2, 880 / L), top = 70, plateL = 150;
+      const sv = new Sv(), s = Math.min(2, 880 / L), top = 70, plateL = 210;
       const pw = Math.max(4, num(v.forendW) * s), plateR = plateL + pw;
       const datumY = top + num(v.topToDatum) * s, yOf = o => datumY - o * s;
       sv.rect(plateL, top, pw, L * s, OUT);
 
-      const pts = v.points.map(p => ({ ...p, off: num(p.off) }));
+      // locking points, each with an optional box behind the faceplate
       const maxOff = num(v.topToDatum), minOff = -(L - num(v.topToDatum));
-      pts.forEach(p => { if (p.off > maxOff || p.off < minOff) warns.push(`A ${p.type} at ${p.off}mm is outside the faceplate.`); });
-      const k = num(v.ptScale) > 0 ? num(v.ptScale) : 1;
-      pts.forEach(p => drawPoint(sv, plateL, yOf(p.off), p.type, s, k));
-
-      // hook boxes
-      const boxes = v.boxes.map(b => ({ ...b, off: num(b.off), bh: num(b.bh), bd: num(b.bd), proj: num(b.proj) }));
-      boxes.forEach(b => {
-        const cy = yOf(b.off), bhp = b.bh * s, down = b.dir !== 'up', endX = Math.max(plateR + 6, plateL + b.bd * s);
-        if (b.off + b.bh / 2 > maxOff || b.off - b.bh / 2 < minOff) warns.push(`A hook box at ${b.off}mm runs off the faceplate.`);
-        sv.rect(plateR, cy - bhp / 2, endX - plateR, bhp, OUT);
-        const ch = b.bh * .55, clawY = down ? cy + bhp / 2 - ch * s / 2 : cy - bhp / 2 + ch * s / 2;
-        if (b.proj > 0) drawPoint(sv, plateL, clawY, down ? 'claw' : 'claw-up', s, 1, b.proj, ch);
-        if (b.dim) {
-          sv.dimV(endX + 30, cy - bhp / 2, cy + bhp / 2, fmt(b.bh));
-          const dy = (b.off > 0 ? cy + bhp / 2 : cy - bhp / 2) + (b.off > 0 ? 28 : -28);
-          if (b.proj > 0) sv.dimH(dy, plateL - Math.max(12, b.proj * s), plateL, fmt(b.proj), 'b', 'l');
-          sv.dimH(dy, plateL, endX, fmt(b.bd), 'b', 'r');
+      const pts = v.points.map(p => ({
+        type: SHAPES[p.type] ? p.type : 'hook', off: num(p.off), proj: num(p.proj), h: num(p.h), bh: num(p.bh), bd: num(p.bd),
+        chain: !!(p.chain ?? p.dim), sd: !!p.sd,
+      }));
+      pts.forEach(p => {
+        const sh = SHAPES[p.type], isHook = p.type.startsWith('hook'), down = p.type !== 'hook-up';
+        const cy = yOf(p.off), box = p.bh > 0 && p.bd > 0, bhp = p.bh * s, endX = Math.max(plateR + 6, plateL + p.bd * s);
+        const projMm = p.proj || sh.w, hMm = p.h || (isHook && box ? p.bh * .55 : sh.h);
+        if (p.off + Math.max(box ? p.bh : 0, hMm) / 2 > maxOff || p.off - Math.max(box ? p.bh : 0, hMm) / 2 < minOff)
+          warns.push(`A ${p.type} at ${p.off}mm runs off the faceplate.`);
+        if (box) sv.rect(plateR, cy - bhp / 2, endX - plateR, bhp, OUT);
+        let by = cy; // a hook sits flush with the open end of its box
+        if (isHook && box) { const hp = Math.max(12, hMm * s); by = down ? cy + bhp / 2 - hp / 2 : cy - bhp / 2 + hp / 2; }
+        const d = drawPoint(sv, plateL, by, p.type, s, projMm, hMm);
+        if (p.sd) {
+          if (box) sv.dimV(endX + 30, cy - bhp / 2, cy + bhp / 2, fmt(p.bh));
+          if (p.h > 0) sv.dimV(plateL - d.w - 28, by - d.h / 2, by + d.h / 2, fmt(p.h), 'l');
+          const half = Math.max(box ? bhp : 0, d.h) / 2, dy = cy + (p.off > 0 ? half + 28 : -half - 28);
+          sv.dimH(dy, plateL - d.w, plateL, fmt(projMm), 'b', 'l');
+          if (box) sv.dimH(dy, plateL, endX, fmt(p.bd), 'b', 'r');
         }
       });
 
-      // gearbox case
+      // gearbox case, spindles (measured from the cylinder) and cylinder
       const cx0 = plateR, cx1 = Math.max(plateR + 6, plateL + num(v.caseDepth) * s);
       const cTop = datumY - num(v.caseTop) * s, cH = num(v.caseH) * s;
       sv.rect(cx0, cTop, cx1 - cx0, cH, OUT);
-      const sx = plateL + num(v.backset) * s;
-      const spins = v.spindles.map(sp => ({ ...sp, off: num(sp.off), size: num(sp.size) || 8 }));
+      const sx = plateL + num(v.backset) * s, cylOff = num(v.cylOffset), cylOn = v.cyl !== 'no';
+      const spins = v.spindles.map(sp => ({ size: num(sp.size) || 8, dim: !!sp.dim, abs: num(sp.off) - cylOff }));
       spins.forEach(sp => {
-        const q = Math.max(7, sp.size * s * 1.1), cy = yOf(sp.off);
+        const q = Math.max(7, sp.size * s * 1.1), cy = yOf(sp.abs);
         sv.rect(sx - q / 2, cy - q / 2, q, q, OUT);
-        if (sp.off > num(v.caseTop) || sp.off < num(v.caseTop) - num(v.caseH)) warns.push(`A spindle at ${sp.off}mm is outside the case.`);
+        if (sp.abs > num(v.caseTop) || sp.abs < num(v.caseTop) - num(v.caseH)) warns.push(`A spindle at ${fmt(sp.abs + cylOff)} from the cylinder is outside the case.`);
       });
-      const cyl = num(v.cylOffset);
-      if (cyl) sv.keyhole(sx, datumY + cyl * s, Math.max(5, 9.5 * s));
+      if (cylOn) sv.keyhole(sx, datumY + cylOff * s, Math.max(5, 9.5 * s));
       if (num(v.caseTop) > num(v.caseH) || num(v.caseTop) < 0) warns.push('Case top above datum should be between 0 and the case height.');
 
-      // left-hand chain (datum + ticked points)
-      const nodes = [{ off: 0 }, ...pts.filter(p => p.dim)].sort((a, b) => b.off - a.off);
-      if (nodes.length > 1) sv.chainV(plateL - 55, nodes.map(n => yOf(n.off)), nodes.map(n => -n.off), 'l');
+      // left-hand chain: datum + ticked points
+      const nodes = [{ off: 0 }, ...pts.filter(p => p.chain)].sort((a, b) => b.off - a.off);
+      if (nodes.length > 1) sv.chainV(plateL - 120, nodes.map(n => yOf(n.off)), nodes.map(n => -n.off), 'l');
 
       // right-hand columns
       const cA = cx1 + 22, cB = cA + 80, cC = cB + 84, cD = cC + 80;
-      const rn = [{ off: 0 }, ...spins.filter(sp => sp.dim && sp.off !== 0)];
-      if (cyl) rn.push({ off: -cyl });
-      rn.sort((a, b) => b.off - a.off);
-      if (rn.length > 1) sv.chainV(cA, rn.map(n => yOf(n.off)), rn.map(n => -n.off), 'r');
+      const rn = [...(cylOn ? [{ abs: -cylOff }] : []), ...spins.filter(sp => sp.dim)].sort((a, b) => b.abs - a.abs);
+      if (rn.length > 1) sv.chainV(cA, rn.map(n => yOf(n.abs)), rn.map(n => -n.abs), 'r');
       sv.dimV(cB, cTop, cTop + cH, fmt(num(v.caseH)));
-      const offs = [...pts.map(p => p.off), ...boxes.map(b => b.off)];
-      const hi = Math.max(0, ...offs), lo = Math.min(0, ...offs);
+      const hi = Math.max(0, ...pts.map(p => p.off)), lo = Math.min(0, ...pts.map(p => p.off));
       if (hi > 0) sv.dimV(cC, yOf(hi), datumY, fmt(hi));
       if (lo < 0) sv.dimV(cC, datumY, yOf(lo), fmt(lo));
       sv.dimV(cD, top, top + L * s, fmt(L) + (num(v.lengthAlt) > 0 ? '/' + fmt(num(v.lengthAlt)) : ''));
@@ -483,25 +479,26 @@ function buildPanel() {
   const w = document.createElement('div'); w.id = 'warns'; p.appendChild(w);
 }
 function listEditor(f) {
-  const wrap = document.createElement('div'), tbl = document.createElement('table'); tbl.className = 'list';
+  const wrap = document.createElement('div'), box = document.createElement('div');
   const draw = () => {
-    tbl.innerHTML = '<tr>' + f.cols.map(c => `<th>${c.label}</th>`).join('') + '<th></th></tr>';
+    box.innerHTML = '';
     state[f.k].forEach((row, i) => {
-      const tr = document.createElement('tr');
+      const card = document.createElement('div'); card.className = 'row';
       f.cols.forEach(c => {
-        const td = document.createElement('td');
-        td.appendChild(inputFor(c, row[c.k], val => { row[c.k] = val; render(); }));
-        tr.appendChild(td);
+        const cell = document.createElement('label'), t = document.createElement('span');
+        cell.className = 'c' + (c.wide ? ' wide' : ''); t.textContent = c.label;
+        cell.append(t, inputFor(c, row[c.k], val => { row[c.k] = val; render(); }));
+        card.appendChild(cell);
       });
-      const td = document.createElement('td'), x = document.createElement('button');
-      x.className = 'x'; x.textContent = '×'; x.onclick = () => { state[f.k].splice(i, 1); draw(); render(); };
-      td.appendChild(x); tr.appendChild(td); tbl.appendChild(tr);
+      const x = document.createElement('button'); x.className = 'x'; x.textContent = '×'; x.title = 'Remove';
+      x.onclick = () => { state[f.k].splice(i, 1); draw(); render(); };
+      card.appendChild(x); box.appendChild(card);
     });
   };
   draw();
   const add = document.createElement('button'); add.textContent = '+ Add row';
   add.onclick = () => { state[f.k].push(clone(f.add)); draw(); render(); };
-  wrap.append(tbl, add);
+  wrap.append(box, add);
   return wrap;
 }
 
