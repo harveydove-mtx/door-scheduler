@@ -90,14 +90,15 @@ class Sv {
       `font-size="13" font-weight="bold" text-anchor="${side === 'r' ? 'start' : 'end'}" paint-order="stroke" stroke="#fff" stroke-width="3"`);
   }
   // horizontal dimension; label above ('t') or below ('b')
-  dimH(y, x1, x2, label, side = 't') {
+  dimH(y, x1, x2, label, side = 't', shortSide = 'r') {
     const a = Math.min(x1, x2), b = Math.max(x1, x2);
     this.add(`<path d="M${a} ${y} L${b} ${y}" stroke="${RED}" stroke-width="1" marker-start="url(#ar)" marker-end="url(#ar)"/>`);
     this.line(a, y - 20, a, y + 20, 'stroke="#777" stroke-width=".8"');
     this.line(b, y - 20, b, y + 20, 'stroke="#777" stroke-width=".8"');
     const short = b - a < 50; // too narrow for the label: push it to the right of the arrows
-    this.text(short ? b + 10 : (a + b) / 2, y + (short ? 4.5 : side === 't' ? -7 : 19), label,
-      `font-size="13" font-weight="bold" text-anchor="${short ? 'start' : 'middle'}" paint-order="stroke" stroke="#fff" stroke-width="3"`);
+    const left = short && shortSide === 'l';
+    this.text(short ? (left ? a - 10 : b + 10) : (a + b) / 2, y + (short ? 4.5 : side === 't' ? -7 : 19), label,
+      `font-size="13" font-weight="bold" text-anchor="${short ? (left ? 'end' : 'start') : 'middle'}" paint-order="stroke" stroke="#fff" stroke-width="3"`);
   }
   // chain of adjacent dimensions. px = pixel positions, mm = matching real values
   chainV(x, px, mm, side) { for (let i = 0; i < px.length - 1; i++) this.dimV(x, px[i], px[i + 1], fmt(mm[i + 1] - mm[i]), side); }
@@ -141,13 +142,18 @@ const SHAPES = {
   mushroom:   { w: 16, h: 18, poly: (w, h) => { const st = h * .16, c = h * .12, u = w * .5; return [[0, -st], [u, -st], [u, -h/2 + c], [u + c, -h/2], [w - c, -h/2], [w, -h/2 + c], [w, h/2 - c], [w - c, h/2], [u + c, h/2], [u, h/2 - c], [u, st], [0, st]]; } },
   pin:        { w: 14, h: 12, poly: (w, h) => { const a = h / 2, c = h * .22; return [[0, -a], [w - c, -a], [w, -a + c], [w, a - c], [w - c, a], [0, a]]; } },
   latch:      { w: 22, h: 26, poly: (w, h) => [[0, -h/2], [w * .72, -h/2], [w, -h/2 + h * .38], [w, h/2], [0, h/2]] },
+  claw:       { w: 23, h: 22, path: (w, h) => { const t = w * .5, th = h * .42; return [['M', [0, -h/2]], ['Q', [w, -h/2], [w, h/2]], ['L', [w - t, h/2]], ['Q', [w - t, -h/2 + th], [0, -h/2 + th]], ['Z']]; } },
+  'claw-up':  { w: 23, h: 22, flip: true, path: (w, h) => SHAPES.claw.path(w, h) },
   deadbolt:   { w: 28, h: 34, poly: (w, h) => { const c = h * .12; return [[0, -h/2], [w - c, -h/2], [w, -h/2 + c], [w, h/2 - c], [w - c, h/2], [0, h/2]]; } },
 };
-function drawPoint(sv, plateL, cy, type, s, k) {
-  const sh = SHAPES[type] || SHAPES.hook, w = Math.max(12, sh.w * s * k), h = Math.max(12, sh.h * s * k);
+function drawPoint(sv, plateL, cy, type, s, k, wMm, hMm) {
+  const sh = SHAPES[type] || SHAPES.hook, w = Math.max(12, (wMm || sh.w) * s * k), h = Math.max(12, (hMm || sh.h) * s * k);
   const X = u => +(plateL - u).toFixed(2), Y = v => +(cy + (sh.flip ? -v : v)).toFixed(2);
   const poly = pts => sv.add(`<polygon points="${pts.map(([u, v]) => X(u) + ',' + Y(v)).join(' ')}" ${OUT} stroke-linejoin="round"/>`);
-  if (sh.custom) { // roller: short stem carrying a wheel with its axle
+  if (sh.path) {
+    const d = sh.path(w, h).map(([c, ...ps]) => c + ps.map(([u, v]) => X(u) + ' ' + Y(v)).join(' ')).join(' ');
+    sv.add(`<path d="${d}" ${OUT} stroke-linejoin="round"/>`);
+  } else if (sh.custom) { // roller: short stem carrying a wheel with its axle
     const st = h * .18, r = h / 2, cu = w - r;
     poly([[0, -st], [cu, -st], [cu, st], [0, st]]);
     sv.circle(X(cu), cy, r, OUT);
@@ -163,6 +169,7 @@ const TEMPLATES = {
       { sec: 'Faceplate' },
       { k: 'length', label: 'Overall faceplate length', type: 'num', def: 1775 },
       { k: 'topToDatum', label: 'Top of faceplate to datum (spindle)', type: 'num', def: 832 },
+      { k: 'lengthAlt', label: 'Alternative overall length (0 = none)', type: 'num', def: 0 },
       { k: 'forendW', label: 'Faceplate width (drawn)', type: 'num', def: 20 },
       { sec: 'Gearbox case' },
       { k: 'caseH', label: 'Case height', type: 'num', def: 200 },
@@ -178,11 +185,19 @@ const TEMPLATES = {
           { k: 'dim', label: 'Dim', type: 'check' }],
         def: [{ off: 0, size: 8, dim: false }],
         add: { off: 0, size: 8, dim: true } },
+      { sec: 'Hook boxes' },
+      { hint: 'A box inside the door edge with a hook bolt out of the front. Offset is the box centre from the datum (positive = above). Height and depth are the box; Hook is how far the hook sticks out. Tick “Dim” to show its dimensions.' },
+      { k: 'boxes', type: 'list', cols: [
+          { k: 'off', label: 'Offset', type: 'num' }, { k: 'bh', label: 'Height', type: 'num' },
+          { k: 'bd', label: 'Depth', type: 'num' }, { k: 'proj', label: 'Hook', type: 'num' },
+          { k: 'dir', label: 'Hook', type: 'select', opts: ['down', 'up'] }, { k: 'dim', label: 'Dim', type: 'check' }],
+        def: [],
+        add: { off: 720, bh: 113, bd: 45, proj: 23, dir: 'down', dim: true } },
       { sec: 'Bolt / keep points' },
       { hint: 'Offset is measured from the datum: positive = above, negative = below. Tick “Dim” to dimension a point in the left-hand chain. Outermost points are dimensioned from the datum automatically.' },
       { k: 'ptScale', label: 'Symbol size (drawing multiplier)', type: 'num', def: 1.6 },
       { k: 'points', type: 'list', cols: [
-          { k: 'type', label: 'Type', type: 'select', opts: Object.keys(SHAPES) },
+          { k: 'type', label: 'Type', type: 'select', opts: Object.keys(SHAPES).filter(k => !k.startsWith('claw')) },
           { k: 'off', label: 'Offset mm', type: 'num' },
           { k: 'dim', label: 'Dim', type: 'check' }],
         def: [
@@ -205,6 +220,22 @@ const TEMPLATES = {
       const k = num(v.ptScale) > 0 ? num(v.ptScale) : 1;
       pts.forEach(p => drawPoint(sv, plateL, yOf(p.off), p.type, s, k));
 
+      // hook boxes
+      const boxes = v.boxes.map(b => ({ ...b, off: num(b.off), bh: num(b.bh), bd: num(b.bd), proj: num(b.proj) }));
+      boxes.forEach(b => {
+        const cy = yOf(b.off), bhp = b.bh * s, down = b.dir !== 'up', endX = Math.max(plateR + 6, plateL + b.bd * s);
+        if (b.off + b.bh / 2 > maxOff || b.off - b.bh / 2 < minOff) warns.push(`A hook box at ${b.off}mm runs off the faceplate.`);
+        sv.rect(plateR, cy - bhp / 2, endX - plateR, bhp, OUT);
+        const ch = b.bh * .55, clawY = down ? cy + bhp / 2 - ch * s / 2 : cy - bhp / 2 + ch * s / 2;
+        if (b.proj > 0) drawPoint(sv, plateL, clawY, down ? 'claw' : 'claw-up', s, 1, b.proj, ch);
+        if (b.dim) {
+          sv.dimV(endX + 30, cy - bhp / 2, cy + bhp / 2, fmt(b.bh));
+          const dy = (b.off > 0 ? cy + bhp / 2 : cy - bhp / 2) + (b.off > 0 ? 28 : -28);
+          if (b.proj > 0) sv.dimH(dy, plateL - Math.max(12, b.proj * s), plateL, fmt(b.proj), 'b', 'l');
+          sv.dimH(dy, plateL, endX, fmt(b.bd), 'b', 'r');
+        }
+      });
+
       // gearbox case
       const cx0 = plateR, cx1 = Math.max(plateR + 6, plateL + num(v.caseDepth) * s);
       const cTop = datumY - num(v.caseTop) * s, cH = num(v.caseH) * s;
@@ -225,18 +256,19 @@ const TEMPLATES = {
       if (nodes.length > 1) sv.chainV(plateL - 55, nodes.map(n => yOf(n.off)), nodes.map(n => -n.off), 'l');
 
       // right-hand columns
-      const cA = cx1 + 22, cB = cA + 70, cC = cB + 70, cD = cC + 70;
+      const cA = cx1 + 22, cB = cA + 80, cC = cB + 84, cD = cC + 80;
       const rn = [{ off: 0 }, ...spins.filter(sp => sp.dim && sp.off !== 0)];
       if (cyl) rn.push({ off: -cyl });
       rn.sort((a, b) => b.off - a.off);
       if (rn.length > 1) sv.chainV(cA, rn.map(n => yOf(n.off)), rn.map(n => -n.off), 'r');
       sv.dimV(cB, cTop, cTop + cH, fmt(num(v.caseH)));
-      const hi = Math.max(0, ...pts.map(p => p.off)), lo = Math.min(0, ...pts.map(p => p.off));
+      const offs = [...pts.map(p => p.off), ...boxes.map(b => b.off)];
+      const hi = Math.max(0, ...offs), lo = Math.min(0, ...offs);
       if (hi > 0) sv.dimV(cC, yOf(hi), datumY, fmt(hi));
       if (lo < 0) sv.dimV(cC, datumY, yOf(lo), fmt(lo));
-      sv.dimV(cD, top, top + L * s, fmt(L));
+      sv.dimV(cD, top, top + L * s, fmt(L) + (num(v.lengthAlt) > 0 ? '/' + fmt(num(v.lengthAlt)) : ''));
 
-      const w = cD + 80, bottom = top + L * s + 45;
+      const w = cD + (num(v.lengthAlt) > 0 ? 130 : 80), bottom = top + L * s + 45;
       sv.titleBlock(w, bottom, v);
       return { svg: sv.finish(w, bottom + 84), warns };
     },
