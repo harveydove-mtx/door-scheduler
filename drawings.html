@@ -326,7 +326,9 @@ const TEMPLATES = {
       { sec: 'Rear plate' },
       { k: 'rearOn', label: 'Show rear plate', type: 'check', def: true },
       { k: 'pad', label: 'Pad (instead of a lever)', type: 'check', def: false },
-      { hint: 'Tick Pad to draw an oval pad on a small round rose on the rear plate, in place of a second lever. The pad has its own spindle position, measured up from the cylinder.' },
+      { k: 'blank', label: 'Blank (no handle on rear plate)', type: 'check', def: false },
+      { k: 'rearCyl', label: 'Rear plate cylinder cut-out', type: 'check', def: true },
+      { hint: 'Tick Pad to draw an oval pad on a small round rose on the rear plate, in place of a second lever. The pad has its own spindle position, measured up from the cylinder. Tick Blank to leave the rear plate without any handle (Blank overrides Pad); untick the cylinder cut-out for a fully blank plate.' },
       { k: 'padC', label: 'Pad: spindle to cylinder', type: 'num', def: 92 },
       { k: 'padL', label: 'Pad length (spindle to end)', type: 'num', def: 48 },
       { k: 'padH', label: 'Pad height', type: 'num', def: 30 },
@@ -343,7 +345,7 @@ const TEMPLATES = {
       if (!up && yU > yc - r) warns.push('The upper screw overlaps the cylinder cut-out.');
       if (up && ys - yU < E / 2 + 4) warns.push('The upper screw overlaps the lever rose.');
       const altC = num(v.altC), ys2 = yc - altC;
-      const rear = !v.rearOn ? 'none' : v.pad ? 'pad' : 'lever';
+      const rear = !v.rearOn ? 'none' : v.blank ? 'blank' : v.pad ? 'pad' : 'lever';
       const padC = num(v.padC), ysP = yc - padC, padL = num(v.padL), padH = num(v.padH);
       if (rear === 'pad' && (padL <= 0 || padH <= 0)) throw new Error('Enter a positive pad length and height.');
       if (rear === 'pad' && (ysP < 0 || padC <= 0)) warns.push('The pad spindle falls outside the plate.');
@@ -374,8 +376,8 @@ const TEMPLATES = {
         sv.rect(px, top, ew, A * s, OUT, ew / 2);
         if (front && altC > 0) lever(cx, Y(ys2), -1, HID); // alternative spindle position, dashed
         if (front || rear === 'lever') lever(cx, Y(ys), front ? -1 : 1, OUT);
-        else { pad(cx, Y(ysP), 1, OUT); cross(cx, Y(ysP), 6); }
-        sv.rect(cx - r * s * .68, Y(yc), r * s * 1.36, r * s * 3.7, OUT, r * s * .68); sv.circle(cx, Y(yc), r * s, OUT); cross(cx, Y(yc), r * s + 6);
+        else if (rear === 'pad') { pad(cx, Y(ysP), 1, OUT); cross(cx, Y(ysP), 6); }
+        if (front || v.rearCyl !== false) { sv.rect(cx - r * s * .68, Y(yc), r * s * 1.36, r * s * 3.7, OUT, r * s * .68); sv.circle(cx, Y(yc), r * s, OUT); cross(cx, Y(yc), r * s + 6); }
         if (front && altC > 0) cross(cx, Y(ys2), 6);
         if (front) {
           cross(cx, Y(ys), 6);
@@ -406,7 +408,7 @@ const TEMPLATES = {
         sv.dimV(pcx + padL * s + 30, Y(ysP) - padH * s / 2, Y(ysP) + padH * s / 2, fmt(padH), 'r', 'Pad height');
       }
 
-      const reach = rear === 'pad' ? padL * s + 90 : Ll * s + 40;
+      const reach = rear === 'pad' ? padL * s + 90 : rear === 'blank' ? ew + 60 : Ll * s + 40;
       const w = Math.max(560, rear !== 'none' ? x1 + ew / 2 + reach : cA + 110), ty = top + A * s + 90;
       sv.titleBlock(w, ty, v);
       return { svg: sv.finish(w, ty + 84), warns, dims: sv.dims };
