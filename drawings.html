@@ -17,6 +17,7 @@ body { font-family: 'Segoe UI', system-ui, -apple-system, sans-serif; background
 .topbar h1 span { display: block; font-size: 12px; font-weight: 400; opacity: .7; }
 button, .btn { font: inherit; cursor: pointer; border: 1px solid var(--border); background: #fff; color: var(--text); padding: 7px 14px; border-radius: 6px; font-weight: 500; }
 button:hover { background: var(--primary-light); }
+.topbar #status { font-size: 12px; max-width: 260px; }
 .topbar button { background: rgba(255,255,255,.15); color: #fff; border-color: rgba(255,255,255,.3); }
 .topbar button:hover { background: rgba(255,255,255,.28); }
 .layout { display: flex; gap: 18px; padding: 18px; align-items: flex-start; }
@@ -52,6 +53,7 @@ button:hover { background: var(--primary-light); }
   .preview svg { max-height: 270mm; max-width: 100%; }
 }
 </style>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
 </head>
 <body>
 <div class="topbar">
@@ -59,10 +61,13 @@ button:hover { background: var(--primary-light); }
   <select id="tplSel" style="padding:7px 10px;border-radius:6px;border:none;font:inherit"></select>
   <button id="bSvg">Download SVG</button>
   <button id="bPng">Download PNG</button>
-  <button id="bPrint">Print / PDF</button>
+  <button id="bWeb" title="PNG fitted into a 1000 x 1000 white square">Web PNG 1000×1000</button>
+  <button id="bPdf">Download PDF</button>
+  <button id="bPrint">Print</button>
   <button id="bSave">Save JSON</button>
   <button id="bLoad">Load JSON</button>
   <button id="bReset">Reset</button>
+  <span id="status" role="status"></span>
   <input type="file" id="fileIn" accept=".json,application/json" hidden>
 </div>
 <div class="layout">
@@ -746,20 +751,54 @@ function switchTo(key) { cur = key; load(key); $('tplSel').value = key; buildPan
 
 /* ---------- export ---------- */
 const slug = () => ((state.code || state.title || 'drawing') + '').trim().replace(/[^a-z0-9]+/gi, '-').replace(/^-|-$/g, '').toLowerCase() || 'drawing';
-function download(name, blob) {
+function note(msg) { const el = $('status'); el.textContent = msg; clearTimeout(note.t); note.t = setTimeout(() => { el.textContent = ''; }, 5000); }
+// Saves a file. On a published page the viewer is asked first (downloads capability); otherwise it is an ordinary browser download.
+async function download(name, blob) {
+  try {
+    const d = window.claude && window.claude.use ? await window.claude.use('downloads') : null;
+    if (d) { await d.save({ filename: name, data: blob }); note('Saved ' + name); return; }
+  } catch (e) {
+    if (e && e.code === 'declined') return;
+    note('Could not save: ' + ((e && (e.message || e.code)) || 'unknown error')); return;
+  }
   const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = name;
   document.body.appendChild(a); a.click(); a.remove(); setTimeout(() => URL.revokeObjectURL(a.href), 1000);
 }
-$('bSvg').onclick = () => { if (lastSvg) download(slug() + '.svg', new Blob([lastSvg], { type: 'image/svg+xml' })); };
-$('bPng').onclick = () => {
-  if (!lastSvg) return;
-  const svg = $('preview').querySelector('svg'), w = +svg.getAttribute('width'), h = +svg.getAttribute('height'), img = new Image();
-  img.onload = () => {
-    const c = document.createElement('canvas'); c.width = w * 2; c.height = h * 2;
-    const g = c.getContext('2d'); g.fillStyle = '#fff'; g.fillRect(0, 0, c.width, c.height); g.drawImage(img, 0, 0, c.width, c.height);
-    c.toBlob(b => download(slug() + '.png', b), 'image/png');
-  };
+const svgSize = () => { const svg = $('preview').querySelector('svg'); return [+svg.getAttribute('width'), +svg.getAttribute('height')]; };
+const svgImage = () => new Promise((ok, fail) => {
+  const img = new Image(); img.onload = () => ok(img); img.onerror = () => fail(new Error('Could not render the drawing'));
   img.src = 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(lastSvg);
+});
+const canvasBlob = c => new Promise(ok => c.toBlob(ok, 'image/png'));
+const whiteCanvas = (w, h) => { const c = document.createElement('canvas'); c.width = w; c.height = h; const g = c.getContext('2d'); g.fillStyle = '#fff'; g.fillRect(0, 0, w, h); g.imageSmoothingQuality = 'high'; return [c, g]; };
+$('bSvg').onclick = () => { if (lastSvg) download(slug() + '.svg', new Blob([lastSvg], { type: 'image/svg+xml' })); };
+$('bPng').onclick = async () => {
+  if (!lastSvg) return;
+  try { const img = await svgImage(), [w, h] = svgSize(), [c, g] = whiteCanvas(w * 2, h * 2); g.drawImage(img, 0, 0, c.width, c.height); await download(slug() + '.png', await canvasBlob(c)); }
+  catch (e) { note(e.message); }
+};
+// Web export: exactly 1000 x 1000 px, white background, the drawing scaled to fit and centred with a 30px margin.
+$('bWeb').onclick = async () => {
+  if (!lastSvg) return;
+  try {
+    const img = await svgImage(), [w, h] = svgSize(), [c, g] = whiteCanvas(1000, 1000), k = Math.min(940 / w, 940 / h);
+    g.drawImage(img, (1000 - w * k) / 2, (1000 - h * k) / 2, w * k, h * k);
+    await download(slug() + '-1000x1000.png', await canvasBlob(c));
+  } catch (e) { note(e.message); }
+};
+// PDF: A4, portrait or landscape to suit the drawing, scaled to fit with a 10mm margin (high-resolution image of the drawing).
+$('bPdf').onclick = async () => {
+  if (!lastSvg) return;
+  try {
+    const J = window.jspdf && window.jspdf.jsPDF;
+    if (!J) throw new Error('The PDF library did not load. Check your connection and try again.');
+    const img = await svgImage(), [w, h] = svgSize(), [c, g] = whiteCanvas(w * 2.5, h * 2.5);
+    g.drawImage(img, 0, 0, c.width, c.height);
+    const doc = new J({ orientation: w > h ? 'landscape' : 'portrait', unit: 'mm', format: 'a4' });
+    const pw = doc.internal.pageSize.getWidth(), ph = doc.internal.pageSize.getHeight(), m = 10, k = Math.min((pw - 2 * m) / w, (ph - 2 * m) / h);
+    doc.addImage(c.toDataURL('image/png'), 'PNG', (pw - w * k) / 2, (ph - h * k) / 2, w * k, h * k, undefined, 'FAST'); // FAST = compress the image
+    await download(slug() + '.pdf', doc.output('blob'));
+  } catch (e) { note(e.message); }
 };
 $('bPrint').onclick = () => window.print();
 $('bSave').onclick = () => download(slug() + '.json', new Blob([JSON.stringify({ template: cur, values: state }, null, 1)], { type: 'application/json' }));
