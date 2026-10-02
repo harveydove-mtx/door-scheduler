@@ -338,17 +338,25 @@ const TEMPLATES = {
       if (!up && yU > yc - r) warns.push('The upper screw overlaps the cylinder cut-out.');
       if (up && ys - yU < E / 2 + 4) warns.push('The upper screw overlaps the lever rose.');
       const altC = num(v.altC), ys2 = yc - altC;
-      const roseR = ew * .47, cross = (x, y, n) => { sv.line(x - n, y, x + n, y, 'stroke="#000" stroke-width=".8"'); sv.line(x, y - n, x, y + n, 'stroke="#000" stroke-width=".8"'); };
-      const plate = (px, front) => {
-        const cx = px + ew / 2, bx = front ? cx - Ll * s : cx;
-        sv.rect(px, top, ew, A * s, OUT, ew / 2);
-        sv.rect(bx, Y(ys) - Lt * s / 2, Ll * s, Lt * s, OUT, Lt * s / 2); // lever
-        sv.circle(cx, Y(ys), roseR, OUT);                                 // rose
-        sv.rect(cx - r * s * .68, Y(yc), r * s * 1.36, r * s * 3.7, OUT, r * s * .68); sv.circle(cx, Y(yc), r * s, OUT); cross(cx, Y(yc), r * s + 6);
-        if (front && altC > 0) { // alternative spindle position, dashed
-          sv.rect(bx, Y(ys2) - Lt * s / 2, Ll * s, Lt * s, HID, Lt * s / 2);
-          sv.circle(cx, Y(ys2), roseR, HID); cross(cx, Y(ys2), 6);
+      const roseR = ew * .47;
+      // one continuous lever outline: rose circle, smooth fillets, then the bar with a rounded tip. dir: -1 = points left, 1 = points right
+      const lever = (cx, cy, dir, attrs) => {
+        const L = Ll * s, t = Lt * s / 2, f = Math.min(t * .8, 6), ve = t + f * .9;
+        if (roseR < ve + 2 || L < roseR) { // too small for fillets: fall back to bar plus circle
+          sv.rect(dir < 0 ? cx - L : cx, cy - t, L, 2 * t, attrs, t); sv.circle(cx, cy, roseR, attrs); return;
         }
+        const u1 = Math.sqrt(roseR * roseR - t * t), ue = Math.sqrt(roseR * roseR - ve * ve), sw = dir > 0 ? 0 : 1;
+        const X = u => +(cx + dir * u).toFixed(2), V = v => +(cy + v).toFixed(2);
+        sv.add(`<path d="M${X(L - t)} ${V(-t)} L${X(u1 + f)} ${V(-t)} Q${X(u1)} ${V(-t)} ${X(ue)} ${V(-ve)} A${roseR} ${roseR} 0 1 ${sw} ${X(ue)} ${V(ve)} Q${X(u1)} ${V(t)} ${X(u1 + f)} ${V(t)} L${X(L - t)} ${V(t)} A${t} ${t} 0 0 ${sw} ${X(L - t)} ${V(-t)} Z" ${attrs} stroke-linejoin="round"/>`);
+      };
+      const cross = (x, y, n) => { sv.line(x - n, y, x + n, y, 'stroke="#000" stroke-width=".8"'); sv.line(x, y - n, x, y + n, 'stroke="#000" stroke-width=".8"'); };
+      const plate = (px, front) => {
+        const cx = px + ew / 2;
+        sv.rect(px, top, ew, A * s, OUT, ew / 2);
+        if (front && altC > 0) lever(cx, Y(ys2), -1, HID); // alternative spindle position, dashed
+        lever(cx, Y(ys), front ? -1 : 1, OUT);
+        sv.rect(cx - r * s * .68, Y(yc), r * s * 1.36, r * s * 3.7, OUT, r * s * .68); sv.circle(cx, Y(yc), r * s, OUT); cross(cx, Y(yc), r * s + 6);
+        if (front && altC > 0) cross(cx, Y(ys2), 6);
         if (front) {
           cross(cx, Y(ys), 6);
           [yU, yL].forEach(y => { const r1 = Math.max(6, num(v.screwD) / 2 * s); sv.circle(cx, Y(y), r1, OUT); sv.circle(cx, Y(y), r1 * .5, OUT); cross(cx, Y(y), r1 + 6); });
