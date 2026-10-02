@@ -330,8 +330,8 @@ const TEMPLATES = {
       { k: 'rearCyl', label: 'Rear plate cylinder cut-out', type: 'check', def: true },
       { hint: 'Tick Pad to draw an oval pad on a small round rose on the rear plate, in place of a second lever. The pad has its own spindle position, measured up from the cylinder. Tick Blank to leave the rear plate without any handle (Blank overrides Pad); untick the cylinder cut-out for a fully blank plate.' },
       { k: 'padC', label: 'Pad: spindle to cylinder', type: 'num', def: 92 },
-      { k: 'padL', label: 'Pad length (spindle to end)', type: 'num', def: 48 },
-      { k: 'padH', label: 'Pad height', type: 'num', def: 30 },
+      { k: 'padL', label: 'Pad length (spindle to end)', type: 'num', def: 54 },
+      { k: 'padH', label: 'Pad height', type: 'num', def: 34 },
     ],
     draw(v) {
       const A = num(v.A), E = num(v.E), warns = [];
@@ -580,7 +580,7 @@ function defaults(key) {
   const v = {};
   [...COMMON, ...TEMPLATES[key].fields].forEach(f => { if (f.k) v[f.k] = clone(f.def ?? ''); });
   v.title = TEMPLATES[key].title;
-  v.ver = 4;
+  v.ver = 5;
   v.hide = Object.fromEntries((TEMPLATES[key].defaultHide || []).map(k => [k, true]));
   return v;
 }
@@ -616,6 +616,8 @@ function fixOld(sv) {
     sv.points.forEach(p => { if (p.flip) p.pos = ({ top: 'bottom', bottom: 'top' }[p.pos] || p.pos); });
     sv.ver = 4;
   }
+  // the pad default grew from 48 x 30 to 54 x 34; saves still on the old default pick up the new one
+  if ((sv.ver || 0) < 5) { if (Number(sv.padL) === 48) sv.padL = 54; if (Number(sv.padH) === 30) sv.padH = 34; sv.ver = 5; }
   return sv;
 }
 function load(key) {
