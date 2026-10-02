@@ -302,7 +302,7 @@ const TEMPLATES = {
   handle: {
     name: 'Multipoint handle (lever on plate)',
     title: 'Multipoint Handle',
-    defaultHide: ['Lever length'],
+    defaultHide: ['Lever length', 'Lever thickness'],
     fields: [
       { sec: 'Backplate' },
       { k: 'A', label: 'Overall plate length (A)', type: 'num', def: 190 },
@@ -314,11 +314,14 @@ const TEMPLATES = {
       { k: 'topS', label: 'Top of plate to spindle', type: 'num', def: 38 },
       { k: 'C', label: 'Spindle to cylinder centre (C)', type: 'num', def: 92 },
       { k: 'cylD', label: 'Cylinder cut-out diameter', type: 'num', def: 17 },
+      { k: 'altC', label: 'Alternative spindle to cylinder (0 = none)', type: 'num', def: 0 },
+      { hint: 'An alternative spindle position (for example 62 as well as 92) is drawn as a dashed second lever.' },
       { sec: 'Fixing screws' },
-      { hint: 'The lower screw sits below the cylinder. The upper screw sits either below the spindle (as in the original drawing) or above it.' },
+      { hint: 'Below spindle: the upper screw sits between the spindle and the cylinder (D) and the lower screw sits below the cylinder (F). Above spindle: both screws sit near the ends of the plate, the distance G in from each end, so screw to screw is the plate length less 2 × G.' },
       { k: 'upper', label: 'Upper screw position', type: 'select', opts: ['below spindle', 'above spindle'], def: 'below spindle' },
-      { k: 'D', label: 'Spindle to upper screw (D)', type: 'num', def: 28 },
-      { k: 'F', label: 'Cylinder end to lower screw (F)', type: 'num', def: 16 },
+      { k: 'D', label: 'Below spindle: spindle to upper screw (D)', type: 'num', def: 28 },
+      { k: 'F', label: 'Below spindle: cylinder end to lower screw (F)', type: 'num', def: 16 },
+      { k: 'G', label: 'Above spindle: screw distance from each end (G)', type: 'num', def: 16 },
       { k: 'screwD', label: 'Screw head diameter', type: 'num', def: 9 },
       { sec: 'Rear plate' },
       { k: 'rear', label: 'Show rear plate', type: 'select', opts: ['yes', 'no'], def: 'yes' },
@@ -327,11 +330,14 @@ const TEMPLATES = {
       const A = num(v.A), E = num(v.E), warns = [];
       if (A <= 0 || E <= 0) throw new Error('Enter a positive plate length and width.');
       const sv = new Sv(), s = Math.min(2.4, 520 / A), top = 60, Ll = num(v.leverL), Lt = Math.max(4, num(v.leverT));
-      const ew = E * s, x0 = Math.max(130, Ll * s - ew / 2 + 40), xr = x0 + ew, xs = x0 + ew / 2, Y = mm => top + mm * s;
+      const ew = E * s, x0 = Math.max(130, Ll * s - ew / 2 + 110), xr = x0 + ew, xs = x0 + ew / 2, Y = mm => top + mm * s;
       const ys = num(v.topS), r = num(v.cylD) / 2, yc = ys + num(v.C), keyEnd = yc + 3.7 * r; // long rounded slot below the cylinder circle, as on the original
-      const up = v.upper === 'above spindle', yU = up ? ys - num(v.D) : ys + num(v.D), yL = keyEnd + num(v.F);
+      const up = v.upper === 'above spindle';
+      const yU = up ? num(v.G) : ys + num(v.D), yL = up ? A - num(v.G) : keyEnd + num(v.F);
       if (yU < 3 || yL > A - 3 || yc < 0) warns.push('A screw or the cylinder falls outside the plate.');
       if (!up && yU > yc - r) warns.push('The upper screw overlaps the cylinder cut-out.');
+      if (up && ys - yU < E / 2 + 4) warns.push('The upper screw overlaps the lever rose.');
+      const altC = num(v.altC), ys2 = yc - altC;
       const roseR = ew * .47, cross = (x, y, n) => { sv.line(x - n, y, x + n, y, 'stroke="#000" stroke-width=".8"'); sv.line(x, y - n, x, y + n, 'stroke="#000" stroke-width=".8"'); };
       const plate = (px, front) => {
         const cx = px + ew / 2, bx = front ? cx - Ll * s : cx;
@@ -339,6 +345,10 @@ const TEMPLATES = {
         sv.rect(bx, Y(ys) - Lt * s / 2, Ll * s, Lt * s, OUT, Lt * s / 2); // lever
         sv.circle(cx, Y(ys), roseR, OUT);                                 // rose
         sv.rect(cx - r * s * .68, Y(yc), r * s * 1.36, r * s * 3.7, OUT, r * s * .68); sv.circle(cx, Y(yc), r * s, OUT); cross(cx, Y(yc), r * s + 6);
+        if (front && altC > 0) { // alternative spindle position, dashed
+          sv.rect(bx, Y(ys2) - Lt * s / 2, Ll * s, Lt * s, HID, Lt * s / 2);
+          sv.circle(cx, Y(ys2), roseR, HID); cross(cx, Y(ys2), 6);
+        }
         if (front) {
           cross(cx, Y(ys), 6);
           [yU, yL].forEach(y => { const r1 = Math.max(6, num(v.screwD) / 2 * s); sv.circle(cx, Y(y), r1, OUT); sv.circle(cx, Y(y), r1 * .5, OUT); cross(cx, Y(y), r1 + 6); });
@@ -347,14 +357,16 @@ const TEMPLATES = {
       plate(x0, true);
 
       // dimensions sit in the gap between the plates, as on the original drawing
-      const cD = xr + 40, cC = cD + 84, cB = cC + 84, cA = cB + 84, x1 = cA + 84, ext = xr + 2;
-      sv.dimV(cD, Y(ys), Y(yU), fmt(num(v.D)), 'r', 'Spindle to upper screw (D)', ext);
+      const cD = xr + 40, cC = cD + 84, cC2 = altC > 0 ? cC + 84 : cC, cB = cC2 + 84, cA = cB + 84, x1 = cA + 84, ext = xr + 2;
+      sv.dimV(cD, Y(ys), Y(yU), fmt(Math.abs(yU - ys)), 'r', 'Spindle to upper screw (D)', ext);
       sv.dimV(cC, Y(ys), Y(yc), fmt(num(v.C)), 'r', 'Spindle to cylinder (C)', ext);
+      if (altC > 0) sv.dimV(cC2, Y(ys2), Y(yc), fmt(altC), 'r', 'Alternative spindle to cylinder', ext);
       sv.dimV(cB, Y(yU), Y(yL), fmt(yL - yU), 'r', 'Screw to screw (B)', ext);
       sv.dimV(cA, top, top + A * s, fmt(A), 'r', 'Overall length (A)', ext);
-      sv.dimV(x0 - 44, Y(keyEnd), Y(yL), fmt(num(v.F)), 'l', 'Cylinder end to lower screw (F)', x0);
+      sv.dimV(x0 - 44, Y(keyEnd), Y(yL), fmt(yL - keyEnd), 'l', 'Cylinder end to lower screw (F)', x0);
       sv.dimH(top + A * s + 42, x0, xr, fmt(E), 'b', 'r', 'Plate width (E)');
       sv.dimH(Y(ys) - Lt * s / 2 - 34, xs - Ll * s, xs, fmt(Ll), 't', 'r', 'Lever length');
+      sv.dimV(xs - Ll * s - 36, Y(ys) - Lt * s / 2, Y(ys) + Lt * s / 2, fmt(Lt), 'l', 'Lever thickness');
       if (v.rear !== 'no') plate(x1, false);
 
       const w = Math.max(560, v.rear !== 'no' ? x1 + ew / 2 + Ll * s + 40 : cA + 110), ty = top + A * s + 90;
