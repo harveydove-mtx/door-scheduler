@@ -302,7 +302,7 @@ const TEMPLATES = {
   handle: {
     name: 'Multipoint handle (lever on plate)',
     title: 'Multipoint Handle',
-    defaultHide: ['Lever length', 'Lever thickness'],
+    defaultHide: ['Lever length', 'Lever thickness', 'Pad length', 'Pad height', 'Rear plate width (E)'],
     fields: [
       { sec: 'Backplate' },
       { k: 'A', label: 'Overall plate length (A)', type: 'num', def: 190 },
@@ -324,7 +324,12 @@ const TEMPLATES = {
       { k: 'G', label: 'Above spindle: screw distance from each end (G)', type: 'num', def: 16 },
       { k: 'screwD', label: 'Screw head diameter', type: 'num', def: 9 },
       { sec: 'Rear plate' },
-      { k: 'rear', label: 'Show rear plate', type: 'select', opts: ['yes', 'no'], def: 'yes' },
+      { k: 'rearOn', label: 'Show rear plate', type: 'check', def: true },
+      { k: 'pad', label: 'Pad (instead of a lever)', type: 'check', def: false },
+      { hint: 'Tick Pad to draw an oval pad on a small round rose on the rear plate, in place of a second lever. The pad has its own spindle position, measured up from the cylinder.' },
+      { k: 'padC', label: 'Pad: spindle to cylinder', type: 'num', def: 92 },
+      { k: 'padL', label: 'Pad length (spindle to end)', type: 'num', def: 48 },
+      { k: 'padH', label: 'Pad height', type: 'num', def: 30 },
     ],
     draw(v) {
       const A = num(v.A), E = num(v.E), warns = [];
@@ -338,6 +343,10 @@ const TEMPLATES = {
       if (!up && yU > yc - r) warns.push('The upper screw overlaps the cylinder cut-out.');
       if (up && ys - yU < E / 2 + 4) warns.push('The upper screw overlaps the lever rose.');
       const altC = num(v.altC), ys2 = yc - altC;
+      const rear = !v.rearOn ? 'none' : v.pad ? 'pad' : 'lever';
+      const padC = num(v.padC), ysP = yc - padC, padL = num(v.padL), padH = num(v.padH);
+      if (rear === 'pad' && (padL <= 0 || padH <= 0)) throw new Error('Enter a positive pad length and height.');
+      if (rear === 'pad' && (ysP < 0 || padC <= 0)) warns.push('The pad spindle falls outside the plate.');
       const roseR = ew * .47;
       // one continuous lever outline: rose circle, smooth fillets, then the bar with a rounded tip. dir: -1 = points left, 1 = points right
       const lever = (cx, cy, dir, attrs) => {
@@ -349,12 +358,23 @@ const TEMPLATES = {
         const X = u => +(cx + dir * u).toFixed(2), V = v => +(cy + v).toFixed(2);
         sv.add(`<path d="M${X(L - t)} ${V(-t)} L${X(u1 + f)} ${V(-t)} Q${X(u1)} ${V(-t)} ${X(ue)} ${V(-ve)} A${roseR} ${roseR} 0 1 ${sw} ${X(ue)} ${V(ve)} Q${X(u1)} ${V(t)} ${X(u1 + f)} ${V(t)} L${X(L - t)} ${V(t)} A${t} ${t} 0 0 ${sw} ${X(L - t)} ${V(-t)} Z" ${attrs} stroke-linejoin="round"/>`);
       };
+      // pad: a small round rose that opens into an oval pad, drawn as one outline (circle and ellipse joined where they cross)
+      const pad = (cx, cy, dir, attrs) => {
+        const Hp = padH * s, Lp = padL * s, R = Math.max(4, Hp * .34), a = (Lp - R * .3) / 2, b = Hp / 2, uc = R * .3 + a;
+        const A2 = 1 / (a * a) - 1 / (b * b), B2 = -2 * uc / (a * a), C2 = uc * uc / (a * a) + R * R / (b * b) - 1;
+        const roots = Math.abs(A2) < 1e-9 ? [-C2 / B2] : (() => { const d = B2 * B2 - 4 * A2 * C2; return d < 0 ? [] : [(-B2 + Math.sqrt(d)) / (2 * A2), (-B2 - Math.sqrt(d)) / (2 * A2)]; })();
+        const u0 = roots.find(u => Math.abs(u) < R - .01 && Math.abs(u - uc) <= a);
+        if (u0 === undefined) { sv.add(`<ellipse cx="${cx + dir * uc}" cy="${cy}" rx="${a}" ry="${b}" ${attrs}/>`); sv.circle(cx, cy, R, attrs); return; }
+        const y0 = Math.sqrt(R * R - u0 * u0), sw = dir > 0 ? 1 : 0, X = u => +(cx + dir * u).toFixed(2), V = w => +(cy + w).toFixed(2);
+        sv.add(`<path d="M${X(u0)} ${V(-y0)} A${a} ${b} 0 1 ${sw} ${X(u0)} ${V(y0)} A${R} ${R} 0 ${u0 > 0 ? 1 : 0} ${sw} ${X(u0)} ${V(-y0)} Z" ${attrs} stroke-linejoin="round"/>`);
+      };
       const cross = (x, y, n) => { sv.line(x - n, y, x + n, y, 'stroke="#000" stroke-width=".8"'); sv.line(x, y - n, x, y + n, 'stroke="#000" stroke-width=".8"'); };
       const plate = (px, front) => {
         const cx = px + ew / 2;
         sv.rect(px, top, ew, A * s, OUT, ew / 2);
         if (front && altC > 0) lever(cx, Y(ys2), -1, HID); // alternative spindle position, dashed
-        lever(cx, Y(ys), front ? -1 : 1, OUT);
+        if (front || rear === 'lever') lever(cx, Y(ys), front ? -1 : 1, OUT);
+        else { pad(cx, Y(ysP), 1, OUT); cross(cx, Y(ysP), 6); }
         sv.rect(cx - r * s * .68, Y(yc), r * s * 1.36, r * s * 3.7, OUT, r * s * .68); sv.circle(cx, Y(yc), r * s, OUT); cross(cx, Y(yc), r * s + 6);
         if (front && altC > 0) cross(cx, Y(ys2), 6);
         if (front) {
@@ -365,7 +385,7 @@ const TEMPLATES = {
       plate(x0, true);
 
       // dimensions sit in the gap between the plates, as on the original drawing
-      const cD = xr + 40, cC = cD + 84, cC2 = altC > 0 ? cC + 84 : cC, cB = cC2 + 84, cA = cB + 84, x1 = cA + 84, ext = xr + 2;
+      const cD = xr + 40, cC = cD + 84, cC2 = altC > 0 ? cC + 84 : cC, cB = cC2 + 84, cA = cB + 84, x1 = cA + (rear === 'pad' ? 160 : 84), ext = xr + 2;
       sv.dimV(cD, Y(ys), Y(yU), fmt(Math.abs(yU - ys)), 'r', 'Spindle to upper screw (D)', ext);
       sv.dimV(cC, Y(ys), Y(yc), fmt(num(v.C)), 'r', 'Spindle to cylinder (C)', ext);
       if (altC > 0) sv.dimV(cC2, Y(ys2), Y(yc), fmt(altC), 'r', 'Alternative spindle to cylinder', ext);
@@ -375,9 +395,19 @@ const TEMPLATES = {
       sv.dimH(top + A * s + 42, x0, xr, fmt(E), 'b', 'r', 'Plate width (E)');
       sv.dimH(Y(ys) - Lt * s / 2 - 34, xs - Ll * s, xs, fmt(Ll), 't', 'r', 'Lever length');
       sv.dimV(xs - Ll * s - 36, Y(ys) - Lt * s / 2, Y(ys) + Lt * s / 2, fmt(Lt), 'l', 'Lever thickness');
-      if (v.rear !== 'no') plate(x1, false);
+      if (rear !== 'none') {
+        plate(x1, false);
+        sv.dimH(top + A * s + 42, x1, x1 + ew, fmt(E), 'b', 'r', 'Rear plate width (E)');
+      }
+      if (rear === 'pad') {
+        const pcx = x1 + ew / 2;
+        sv.dimV(x1 - 44, Y(ysP), Y(yc), fmt(padC), 'l', 'Pad spindle to cylinder', x1);
+        sv.dimH(Y(ysP) - padH * s / 2 - 30, pcx, pcx + padL * s, fmt(padL), 't', 'r', 'Pad length');
+        sv.dimV(pcx + padL * s + 30, Y(ysP) - padH * s / 2, Y(ysP) + padH * s / 2, fmt(padH), 'r', 'Pad height');
+      }
 
-      const w = Math.max(560, v.rear !== 'no' ? x1 + ew / 2 + Ll * s + 40 : cA + 110), ty = top + A * s + 90;
+      const reach = rear === 'pad' ? padL * s + 90 : Ll * s + 40;
+      const w = Math.max(560, rear !== 'none' ? x1 + ew / 2 + reach : cA + 110), ty = top + A * s + 90;
       sv.titleBlock(w, ty, v);
       return { svg: sv.finish(w, ty + 84), warns, dims: sv.dims };
     },
@@ -557,6 +587,9 @@ let state = {};
 // Older saves had one "Size dims" tick per point; turn an unticked one into hidden dimensions.
 function migrate(v) {
   if (!v.hide) v.hide = {};
+  if (v.rear !== undefined) { // older saves used a Rear plate dropdown
+    v.rearOn = !(v.rear === 'no' || v.rear === 'none'); v.pad = v.rear === 'pad'; delete v.rear;
+  }
   if (Array.isArray(v.points)) v.points.forEach((p, i) => { // 'hook-up' became hook + Hook at top + Flip
     if (p.type !== 'hook-up') return;
     p.type = 'hook'; p.pos = 'bottom'; p.flip = true;
