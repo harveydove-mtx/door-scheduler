@@ -33,6 +33,11 @@ button:hover { background: var(--primary-light); }
 .row input[type=number], .row select { width: 100%; min-width: 0; padding: 4px 5px; border: 1px solid var(--border); border-radius: 4px; font: inherit; font-size: 12px; background: var(--field, #fff); color: var(--text); }
 .row input[type=checkbox] { width: 16px; height: 16px; margin: 5px 0 0 2px; }
 .row .x { position: absolute; top: -9px; right: -6px; width: 20px; height: 20px; padding: 0; line-height: 1; border-radius: 50%; background: var(--card, #fff); }
+.dimbar { display: flex; gap: 6px; margin-bottom: 8px; }
+.dimbar button { padding: 4px 10px; font-size: 12px; }
+.dimrow { display: flex; align-items: center; gap: 8px; font-size: 12.5px; margin-bottom: 5px; cursor: pointer; }
+.dimrow span { flex: 1; min-width: 0; }
+.dimrow b { font-weight: 600; font-variant-numeric: tabular-nums; }
 .x { padding: 2px 8px; color: var(--red); }
 .hint { font-size: 12px; color: var(--text-muted); margin: 2px 0 8px; }
 .warn { background: #FFF2CC; border: 1px solid #BF8F00; color: #6b4e00; border-radius: 6px; padding: 8px 10px; font-size: 12.5px; margin-top: 10px; }
@@ -75,14 +80,17 @@ const HID = 'stroke="#000" stroke-width="1" stroke-dasharray="5 3" fill="none"';
 const CEN = 'stroke="#555" stroke-width=".8" stroke-dasharray="10 3 2 3" fill="none"';
 
 class Sv {
-  constructor() { this.o = []; }
+  constructor() { this.o = []; this.dims = []; this.hide = (state && state.hide) || {}; }
+  // every named dimension is registered (so it can be listed in the panel); hidden ones are skipped
+  reg(key, label) { if (!key) return true; this.dims.push({ key, label }); return !this.hide[key]; }
   add(s) { this.o.push(s); }
   line(x1, y1, x2, y2, a) { this.add(`<line x1="${x1}" y1="${y1}" x2="${x2}" y2="${y2}" ${a || OUT}/>`); }
   rect(x, y, w, h, a, r) { this.add(`<rect x="${x}" y="${y}" width="${Math.max(0, w)}" height="${Math.max(0, h)}" ${r ? `rx="${r}"` : ''} ${a || OUT}/>`); }
   circle(cx, cy, r, a) { this.add(`<circle cx="${cx}" cy="${cy}" r="${Math.max(0, r)}" ${a || OUT}/>`); }
   text(x, y, t, a) { this.add(`<text x="${x}" y="${y}" font-family="Arial, Helvetica, sans-serif" ${a || 'font-size="13"'}>${esc(t)}</text>`); }
   // vertical dimension (arrow line at x from y1 to y2), label to the right ('r') or left ('l')
-  dimV(x, y1, y2, label, side = 'r') {
+  dimV(x, y1, y2, label, side = 'r', key) {
+    if (!this.reg(key, label)) return;
     const a = Math.min(y1, y2), b = Math.max(y1, y2);
     this.add(`<path d="M${x} ${a} L${x} ${b}" stroke="${RED}" stroke-width="1" marker-start="url(#ar)" marker-end="url(#ar)"/>`);
     this.line(x - 20, a, x + 20, a, 'stroke="#777" stroke-width=".8"');
@@ -91,7 +99,8 @@ class Sv {
       `font-size="13" font-weight="bold" text-anchor="${side === 'r' ? 'start' : 'end'}" paint-order="stroke" stroke="#fff" stroke-width="3"`);
   }
   // horizontal dimension; label above ('t') or below ('b')
-  dimH(y, x1, x2, label, side = 't', shortSide = 'r') {
+  dimH(y, x1, x2, label, side = 't', shortSide = 'r', key) {
+    if (!this.reg(key, label)) return;
     const a = Math.min(x1, x2), b = Math.max(x1, x2);
     this.add(`<path d="M${a} ${y} L${b} ${y}" stroke="${RED}" stroke-width="1" marker-start="url(#ar)" marker-end="url(#ar)"/>`);
     this.line(a, y - 20, a, y + 20, 'stroke="#777" stroke-width=".8"');
@@ -102,8 +111,8 @@ class Sv {
       `font-size="13" font-weight="bold" text-anchor="${short ? (left ? 'end' : 'start') : 'middle'}" paint-order="stroke" stroke="#fff" stroke-width="3"`);
   }
   // chain of adjacent dimensions. px = pixel positions, mm = matching real values
-  chainV(x, px, mm, side) { for (let i = 0; i < px.length - 1; i++) this.dimV(x, px[i], px[i + 1], fmt(mm[i + 1] - mm[i]), side); }
-  chainH(y, px, mm, side) { for (let i = 0; i < px.length - 1; i++) this.dimH(y, px[i], px[i + 1], fmt(mm[i + 1] - mm[i]), side); }
+  chainV(x, px, mm, side, key) { for (let i = 0; i < px.length - 1; i++) this.dimV(x, px[i], px[i + 1], fmt(mm[i + 1] - mm[i]), side, key && `${key} ${i + 1}`); }
+  chainH(y, px, mm, side, key) { for (let i = 0; i < px.length - 1; i++) this.dimH(y, px[i], px[i + 1], fmt(mm[i + 1] - mm[i]), side, 'r', key && `${key} ${i + 1}`); }
   keyhole(cx, cy, r) { // euro-profile cylinder cut-out
     this.rect(cx - r * .55, cy, r * 1.1, r * 1.9, OUT);
     this.circle(cx, cy, r, OUT);
@@ -217,8 +226,8 @@ const TEMPLATES = {
         type: SHAPES[p.type] ? p.type : 'hook', off: num(p.off), proj: num(p.proj), h: num(p.h), bh: num(p.bh), bd: num(p.bd),
         chain: !!(p.chain ?? p.dim), sd: !!p.sd,
       }));
-      pts.forEach(p => {
-        const sh = SHAPES[p.type], isHook = p.type.startsWith('hook'), down = p.type !== 'hook-up';
+      pts.forEach((p, i) => {
+        const pn = `Point ${i + 1} (${p.type})`, sh = SHAPES[p.type], isHook = p.type.startsWith('hook'), down = p.type !== 'hook-up';
         const cy = yOf(p.off), box = p.bh > 0 && p.bd > 0, bhp = p.bh * s, endX = Math.max(plateR + 6, plateL + p.bd * s);
         const projMm = p.proj || sh.w, hMm = p.h || (isHook && box ? p.bh * .55 : sh.h);
         if (p.off + Math.max(box ? p.bh : 0, hMm) / 2 > maxOff || p.off - Math.max(box ? p.bh : 0, hMm) / 2 < minOff)
@@ -228,11 +237,11 @@ const TEMPLATES = {
         if (isHook && box) { const hp = Math.max(12, hMm * s); by = down ? cy + bhp / 2 - hp / 2 : cy - bhp / 2 + hp / 2; }
         const d = drawPoint(sv, plateL, by, p.type, s, projMm, hMm);
         if (p.sd) {
-          if (box) sv.dimV(endX + 30, cy - bhp / 2, cy + bhp / 2, fmt(p.bh));
-          if (p.h > 0) sv.dimV(plateL - d.w - 28, by - d.h / 2, by + d.h / 2, fmt(p.h), 'l');
+          if (box) sv.dimV(endX + 30, cy - bhp / 2, cy + bhp / 2, fmt(p.bh), 'r', pn + ' box height');
+          if (p.h > 0) sv.dimV(plateL - d.w - 28, by - d.h / 2, by + d.h / 2, fmt(p.h), 'l', pn + ' height');
           const half = Math.max(box ? bhp : 0, d.h) / 2, dy = cy + (p.off > 0 ? half + 28 : -half - 28);
-          sv.dimH(dy, plateL - d.w, plateL, fmt(projMm), 'b', 'l');
-          if (box) sv.dimH(dy, plateL, endX, fmt(p.bd), 'b', 'r');
+          sv.dimH(dy, plateL - d.w, plateL, fmt(projMm), 'b', 'l', pn + ' sticks out');
+          if (box) sv.dimH(dy, plateL, endX, fmt(p.bd), 'b', 'r', pn + ' box depth');
         }
       });
 
@@ -252,21 +261,21 @@ const TEMPLATES = {
 
       // left-hand chain: datum + ticked points
       const nodes = [{ off: 0 }, ...pts.filter(p => p.chain)].sort((a, b) => b.off - a.off);
-      if (nodes.length > 1) sv.chainV(plateL - 120, nodes.map(n => yOf(n.off)), nodes.map(n => -n.off), 'l');
+      if (nodes.length > 1) sv.chainV(plateL - 120, nodes.map(n => yOf(n.off)), nodes.map(n => -n.off), 'l', 'Offset chain');
 
       // right-hand columns
       const cA = cx1 + 22, cB = cA + 80, cC = cB + 84, cD = cC + 80;
       const rn = [...(cylOn ? [{ abs: -cylOff }] : []), ...spins.filter(sp => sp.dim)].sort((a, b) => b.abs - a.abs);
-      if (rn.length > 1) sv.chainV(cA, rn.map(n => yOf(n.abs)), rn.map(n => -n.abs), 'r');
-      sv.dimV(cB, cTop, cTop + cH, fmt(num(v.caseH)));
+      if (rn.length > 1) sv.chainV(cA, rn.map(n => yOf(n.abs)), rn.map(n => -n.abs), 'r', 'Cylinder / spindle chain');
+      sv.dimV(cB, cTop, cTop + cH, fmt(num(v.caseH)), 'r', 'Case height');
       const hi = Math.max(0, ...pts.map(p => p.off)), lo = Math.min(0, ...pts.map(p => p.off));
-      if (hi > 0) sv.dimV(cC, yOf(hi), datumY, fmt(hi));
-      if (lo < 0) sv.dimV(cC, datumY, yOf(lo), fmt(lo));
-      sv.dimV(cD, top, top + L * s, fmt(L) + (num(v.lengthAlt) > 0 ? '/' + fmt(num(v.lengthAlt)) : ''));
+      if (hi > 0) sv.dimV(cC, yOf(hi), datumY, fmt(hi), 'r', 'Datum to top point');
+      if (lo < 0) sv.dimV(cC, datumY, yOf(lo), fmt(lo), 'r', 'Datum to bottom point');
+      sv.dimV(cD, top, top + L * s, fmt(L) + (num(v.lengthAlt) > 0 ? '/' + fmt(num(v.lengthAlt)) : ''), 'r', 'Overall length');
 
       const w = cD + (num(v.lengthAlt) > 0 ? 130 : 80), bottom = top + L * s + 45;
       sv.titleBlock(w, bottom, v);
-      return { svg: sv.finish(w, bottom + 84), warns };
+      return { svg: sv.finish(w, bottom + 84), warns, dims: sv.dims };
     },
   },
 
@@ -308,10 +317,10 @@ const TEMPLATES = {
         sv.circle(hx, top + y * s, num(v.holeD) / 2 * s, OUT);
       }));
 
-      sv.chainV(x0 - 50, [top, ...hy.map(y => top + y * s), bot], [0, ...hy, H], 'l');
-      sv.dimV(xR + 50, top, bot, fmt(H));
-      sv.dimH(top - 34, x0, xR, fmt(O));
-      sv.dimH(bot + 36, x0, x0 + inset * s, fmt(inset), 'b');
+      sv.chainV(x0 - 50, [top, ...hy.map(y => top + y * s), bot], [0, ...hy, H], 'l', 'Hole spacing');
+      sv.dimV(xR + 50, top, bot, fmt(H), 'r', 'Height');
+      sv.dimH(top - 34, x0, xR, fmt(O), 't', 'r', 'Open width');
+      sv.dimH(bot + 36, x0, x0 + inset * s, fmt(inset), 'b', 'r', 'Hole distance from edge');
       sv.text(x0, bot + 76, `${n} × Ø${num(v.holeD)}mm holes per leaf${v.csk === 'yes' ? ', countersunk' : ''}`, 'font-size="12" fill="#444"');
 
       // plan view
@@ -319,11 +328,11 @@ const TEMPLATES = {
       sv.text(x0, py - 40, 'PLAN (open flat)', 'font-size="11" fill="#666"');
       sv.rect(x0, py - th / 2, O * s, th, OUT);
       sv.circle((xK0 + xK1) / 2, py, K * s / 2, OUT);
-      sv.dimH(py + K * s / 2 + 32, xK0, xK1, 'Ø' + fmt(K), 'b');
-      sv.dimV(xR + 50, py - th / 2, py + th / 2, fmt(t));
+      sv.dimH(py + K * s / 2 + 32, xK0, xK1, 'Ø' + fmt(K), 'b', 'r', 'Knuckle diameter');
+      sv.dimV(xR + 50, py - th / 2, py + th / 2, fmt(t), 'r', 'Leaf thickness');
       const w = xR + 130, y = py + K * s / 2 + 76;
       sv.titleBlock(w, y, v);
-      return { svg: sv.finish(w, y + 84), warns };
+      return { svg: sv.finish(w, y + 84), warns, dims: sv.dims };
     },
   },
 
@@ -354,8 +363,8 @@ const TEMPLATES = {
         sv.line(bx, cy - baseD / 2 * s - 8, bx, cy + baseD / 2 * s + 8, CEN);
       });
       sv.rect(bx - bw / 2, top, bw, L * s, OUT, bw / 2);
-      sv.dimV(bx - bw / 2 - 60, c1, c2, fmt(C), 'l');
-      sv.dimV(bx + bw / 2 + 55, top, top + L * s, fmt(L));
+      sv.dimV(bx - bw / 2 - 60, c1, c2, fmt(C), 'l', 'Fixing centres');
+      sv.dimV(bx + bw / 2 + 55, top, top + L * s, fmt(L), 'r', 'Overall length');
 
       // side view, aligned on the top fixing
       const sx = bx + 160, cy = c1, barCx = sx + (P - D / 2) * s;
@@ -364,14 +373,14 @@ const TEMPLATES = {
       sv.rect(sx, cy - baseD / 2 * s, baseT * s, baseD * s, OUT);
       sv.rect(sx + baseT * s, cy - postD / 2 * s, barCx - sx - baseT * s, postD * s, OUT);
       sv.circle(barCx, cy, D / 2 * s, OUT);
-      sv.dimH(cy + baseD / 2 * s + 55, sx, sx + P * s, fmt(P), 'b');
-      sv.dimV(sx - 50, cy - baseD / 2 * s, cy + baseD / 2 * s, 'Ø' + fmt(baseD), 'l');
-      sv.dimV(sx + P * s + 45, cy - D / 2 * s, cy + D / 2 * s, 'Ø' + fmt(D));
-      if (baseT > 0) sv.dimH(cy - baseD / 2 * s - 26, sx, sx + baseT * s, fmt(baseT), 't');
+      sv.dimH(cy + baseD / 2 * s + 55, sx, sx + P * s, fmt(P), 'b', 'r', 'Projection');
+      sv.dimV(sx - 50, cy - baseD / 2 * s, cy + baseD / 2 * s, 'Ø' + fmt(baseD), 'l', 'Rosette diameter');
+      sv.dimV(sx + P * s + 45, cy - D / 2 * s, cy + D / 2 * s, 'Ø' + fmt(D), 'r', 'Bar diameter');
+      if (baseT > 0) sv.dimH(cy - baseD / 2 * s - 26, sx, sx + baseT * s, fmt(baseT), 't', 'r', 'Rosette thickness');
 
       const w = sx + P * s + 130, y = top + L * s + 40;
       sv.titleBlock(w, y, v, `Post Ø${postD}mm`);
-      return { svg: sv.finish(w, y + 84), warns };
+      return { svg: sv.finish(w, y + 84), warns, dims: sv.dims };
     },
   },
 
@@ -412,15 +421,15 @@ const TEMPLATES = {
       });
       const uniq = (a) => [...new Set(a.map(x => Math.round(x * 100) / 100))].sort((p, q) => p - q);
       const ys = uniq([0, ...hs.filter(h => h.dim).map(h => h.y)]), xs = uniq([0, ...hs.filter(h => h.dim).map(h => h.x)]);
-      if (ys.length > 1) sv.chainV(pl - 55, ys.map(y => bot - y * s), ys, 'l');
-      if (xs.length > 1) sv.chainH(bot + 45, xs.map(x => pl + x * s), xs, 'b');
-      sv.dimH(bot + 95, pl, pr, fmt(W), 'b');
-      sv.dimV(pr + 55, top, bot, fmt(H));
+      if (ys.length > 1) sv.chainV(pl - 55, ys.map(y => bot - y * s), ys, 'l', 'Hole heights');
+      if (xs.length > 1) sv.chainH(bot + 45, xs.map(x => pl + x * s), xs, 'b', 'Hole positions');
+      sv.dimH(bot + 95, pl, pr, fmt(W), 'b', 'r', 'Width');
+      sv.dimV(pr + 55, top, bot, fmt(H), 'r', 'Height');
       const legend = Object.entries(counts).map(([k, n]) => `${n}× ${k}`).join(', ');
       if (legend) sv.text(pl - 100, bot + 135, 'Holes: ' + legend, 'font-size="12" fill="#444"');
       const w = Math.max(520, pr + 130), y = bot + 155;
       sv.titleBlock(w, y, v);
-      return { svg: sv.finish(w, y + 84), warns };
+      return { svg: sv.finish(w, y + 84), warns, dims: sv.dims };
     },
   },
 };
@@ -435,6 +444,7 @@ function defaults(key) {
   const v = {};
   [...COMMON, ...TEMPLATES[key].fields].forEach(f => { if (f.k) v[f.k] = clone(f.def ?? ''); });
   v.title = TEMPLATES[key].title;
+  v.hide = {};
   return v;
 }
 let cur = LS.get('mtxdraw:last'); if (!TEMPLATES[cur]) cur = 'multi';
@@ -477,6 +487,31 @@ function buildPanel() {
   addFields([{ sec: 'Title block' }, ...COMMON]);
   addFields(T.fields);
   const w = document.createElement('div'); w.id = 'warns'; p.appendChild(w);
+  const h = document.createElement('h2'); h.textContent = 'Dimensions shown'; p.appendChild(h);
+  const hint = document.createElement('div'); hint.className = 'hint'; hint.textContent = 'Untick a dimension to hide it from the drawing.'; p.appendChild(hint);
+  const bar = document.createElement('div'); bar.className = 'dimbar';
+  const all = document.createElement('button'), none = document.createElement('button');
+  all.textContent = 'Show all'; none.textContent = 'Hide all';
+  all.onclick = () => { state.hide = {}; dimSig = ''; render(); };
+  none.onclick = () => { state.hide = Object.fromEntries(lastDims.map(d => [d.key, true])); dimSig = ''; render(); };
+  bar.append(all, none); p.appendChild(bar);
+  const list = document.createElement('div'); list.id = 'dimList'; p.appendChild(list);
+  dimSig = '';
+}
+let dimSig = '', lastDims = [];
+function renderDims(dims) {
+  lastDims = dims;
+  const box = $('dimList'); if (!box) return;
+  const sig = dims.map(d => d.key + '|' + d.label).join('\n');
+  if (sig === dimSig) return;
+  dimSig = sig; box.innerHTML = '';
+  dims.forEach(d => {
+    const row = document.createElement('label'), cb = document.createElement('input'), name = document.createElement('span'), val = document.createElement('b');
+    row.className = 'dimrow'; cb.type = 'checkbox'; cb.checked = !state.hide[d.key];
+    cb.onchange = () => { if (cb.checked) delete state.hide[d.key]; else state.hide[d.key] = true; render(); };
+    name.textContent = d.key; val.textContent = d.label;
+    row.append(cb, name, val); box.appendChild(row);
+  });
 }
 function listEditor(f) {
   const wrap = document.createElement('div'), box = document.createElement('div');
@@ -508,10 +543,10 @@ function render() {
   const prev = $('preview'), wEl = $('warns');
   try {
     const r = TEMPLATES[cur].draw(state);
-    lastSvg = r.svg; prev.innerHTML = r.svg;
+    lastSvg = r.svg; prev.innerHTML = r.svg; renderDims(r.dims || []);
     if (wEl) wEl.innerHTML = r.warns.length ? `<div class="warn">${r.warns.map(esc).join('<br>')}</div>` : '';
   } catch (e) {
-    lastSvg = ''; prev.innerHTML = `<div class="warn" style="align-self:flex-start">${esc(e.message)}</div>`;
+    lastSvg = ''; prev.innerHTML = `<div class="warn" style="align-self:flex-start">${esc(e.message)}</div>`; renderDims([]);
     if (wEl) wEl.innerHTML = '';
   }
 }
