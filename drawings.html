@@ -443,6 +443,7 @@ const TEMPLATES = {
 
   hinge: {
     name: 'Hinge (butt)',
+    hidden: true, // built but not offered for now; see SHOW_HIDDEN_TEMPLATES
     title: 'Butt Hinge',
     fields: [
       { sec: 'Hinge body' },
@@ -500,6 +501,7 @@ const TEMPLATES = {
 
   pull: {
     name: 'Pull handle (bar)',
+    hidden: true, // built but not offered for now; see SHOW_HIDDEN_TEMPLATES
     title: 'Pull Handle',
     fields: [
       { sec: 'Bar' },
@@ -548,6 +550,7 @@ const TEMPLATES = {
 
   plate: {
     name: 'Plate / escutcheon / backplate',
+    hidden: true, // built but not offered for now; see SHOW_HIDDEN_TEMPLATES
     title: 'Backplate',
     fields: [
       { sec: 'Plate' },
@@ -596,6 +599,10 @@ const TEMPLATES = {
   },
 };
 
+// Templates marked hidden: true are kept in the file but left out of the picker. Set this to true to offer them again.
+const SHOW_HIDDEN_TEMPLATES = false;
+const isHidden = k => !!TEMPLATES[k].hidden && !SHOW_HIDDEN_TEMPLATES;
+
 /* ---------- state, persistence ---------- */
 const LS = {
   get(k) { try { return localStorage.getItem(k); } catch (e) { return null; } },
@@ -610,7 +617,7 @@ function defaults(key) {
   v.hide = Object.fromEntries((TEMPLATES[key].defaultHide || []).map(k => [k, true]));
   return v;
 }
-let cur = LS.get('mtxdraw:last'); if (!TEMPLATES[cur]) cur = 'multi';
+let cur = LS.get('mtxdraw:last'); if (!TEMPLATES[cur] || isHidden(cur)) cur = 'multi';
 let state = {};
 // Older saves had one "Size dims" tick per point; turn an unticked one into hidden dimensions.
 function migrate(v) {
@@ -818,7 +825,7 @@ $('fileIn').onchange = e => {
   const f = e.target.files[0]; if (!f) return;
   f.text().then(t => {
     const d = JSON.parse(t);
-    if (!TEMPLATES[d.template]) throw new Error('Unknown template');
+    if (!TEMPLATES[d.template] || isHidden(d.template)) throw new Error('Unknown template');
     cur = d.template; state = migrate(Object.assign(defaults(cur), fixOld(d.values)));
     $('tplSel').value = cur; buildPanel(); render();
   }).catch(err => alert('Could not load file: ' + err.message)).finally(() => { e.target.value = ''; });
@@ -826,7 +833,7 @@ $('fileIn').onchange = e => {
 $('bReset').onclick = () => { if (confirm('Reset this drawing to its default dimensions?')) { state = defaults(cur); buildPanel(); render(); } };
 
 /* ---------- init ---------- */
-Object.entries(TEMPLATES).forEach(([k, t]) => { const o = document.createElement('option'); o.value = k; o.textContent = t.name; $('tplSel').appendChild(o); });
+Object.entries(TEMPLATES).filter(([k]) => !isHidden(k)).forEach(([k, t]) => { const o = document.createElement('option'); o.value = k; o.textContent = t.name; $('tplSel').appendChild(o); });
 $('tplSel').onchange = e => switchTo(e.target.value);
 switchTo(cur);
 </script>
