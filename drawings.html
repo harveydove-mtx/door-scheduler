@@ -750,6 +750,8 @@ function render() {
 function switchTo(key) { cur = key; load(key); $('tplSel').value = key; buildPanel(); render(); }
 
 /* ---------- export ---------- */
+// product code as typed (only characters that are illegal in file names are removed); falls back to the title
+const fileBase = () => ((state.code || '').trim() || (state.title || '').trim() || 'drawing').replace(/[\\/:*?"<>|]+/g, '').replace(/\s+/g, ' ').trim() || 'drawing';
 const slug = () => ((state.code || state.title || 'drawing') + '').trim().replace(/[^a-z0-9]+/gi, '-').replace(/^-|-$/g, '').toLowerCase() || 'drawing';
 function note(msg) { const el = $('status'); el.textContent = msg; clearTimeout(note.t); note.t = setTimeout(() => { el.textContent = ''; }, 5000); }
 // Saves a file. On a published page the viewer is asked first (downloads capability); otherwise it is an ordinary browser download.
@@ -797,7 +799,7 @@ $('bPdf').onclick = async () => {
     const doc = new J({ orientation: w > h ? 'landscape' : 'portrait', unit: 'mm', format: 'a4' });
     const pw = doc.internal.pageSize.getWidth(), ph = doc.internal.pageSize.getHeight(), m = 10, k = Math.min((pw - 2 * m) / w, (ph - 2 * m) / h);
     doc.addImage(c.toDataURL('image/png'), 'PNG', (pw - w * k) / 2, (ph - h * k) / 2, w * k, h * k, undefined, 'FAST'); // FAST = compress the image
-    await download(slug() + '.pdf', doc.output('blob'));
+    await download(fileBase() + '_drawing.pdf', doc.output('blob')); // product code, then _drawing
   } catch (e) { note(e.message); }
 };
 $('bPrint').onclick = () => window.print();
