@@ -146,8 +146,9 @@ const COMMON = [
 // Side-profile symbols. Coordinates are (u, v): u = distance out from the faceplate, v = vertical (down is +).
 // w = how far the part sticks out, h = its height, both in real mm (shown at least 12px so they stay visible on a long faceplate).
 const SHAPES = {
-  hook:       { w: 23, h: 22, path: (w, h) => { const t = w * .5, th = h * .42; return [['M', [0, -h/2]], ['Q', [w, -h/2], [w, h/2]], ['L', [w - t, h/2]], ['Q', [w - t, -h/2 + th], [0, -h/2 + th]], ['Z']]; } },
-  'hook-up':  { w: 23, h: 22, flip: true, path: (w, h) => SHAPES.hook.path(w, h) },
+  // straight arm out of the faceplate, then a pointed tooth whose tip turns back toward the door
+  hook:       { w: 23, h: 28, min: 16, path: (w, h) => { const th = h * .3, r = Math.min(h * .25, w * .4); return [['M', [0, -h/2]], ['L', [w - r, -h/2]], ['Q', [w, -h/2], [w, -h/2 + r]], ['L', [w, h * .05]], ['L', [w * .6, h/2]], ['L', [w * .74, h * .12]], ['L', [w * .74, -h/2 + th]], ['L', [0, -h/2 + th]], ['Z']]; } },
+  'hook-up':  { w: 23, h: 28, min: 16, flip: true, path: (w, h) => SHAPES.hook.path(w, h) },
   roller:     { w: 20, h: 16, custom: true },
   mushroom:   { w: 16, h: 18, poly: (w, h) => { const st = h * .16, c = h * .12, u = w * .5; return [[0, -st], [u, -st], [u, -h/2 + c], [u + c, -h/2], [w - c, -h/2], [w, -h/2 + c], [w, h/2 - c], [w - c, h/2], [u + c, h/2], [u, h/2 - c], [u, st], [0, st]]; } },
   pin:        { w: 14, h: 12, poly: (w, h) => { const a = h / 2, c = h * .22; return [[0, -a], [w - c, -a], [w, -a + c], [w, a - c], [w - c, a], [0, a]]; } },
@@ -155,8 +156,12 @@ const SHAPES = {
   deadbolt:   { w: 28, h: 34, poly: (w, h) => { const c = h * .12; return [[0, -h/2], [w - c, -h/2], [w, -h/2 + c], [w, h/2 - c], [w - c, h/2], [0, h/2]]; } },
 };
 // Draws one locking part out of the faceplate's left face; returns its drawn size in px.
+function ptSize(type, s, wMm, hMm) {
+  const m = (SHAPES[type] || SHAPES.hook).min || 12;
+  return { w: Math.max(m, wMm * s), h: Math.max(m, hMm * s) };
+}
 function drawPoint(sv, plateL, cy, type, s, wMm, hMm) {
-  const sh = SHAPES[type] || SHAPES.hook, w = Math.max(12, wMm * s), h = Math.max(12, hMm * s);
+  const sh = SHAPES[type] || SHAPES.hook, { w, h } = ptSize(type, s, wMm, hMm);
   const X = u => +(plateL - u).toFixed(2), Y = v => +(cy + (sh.flip ? -v : v)).toFixed(2);
   const poly = pts => sv.add(`<polygon points="${pts.map(([u, v]) => X(u) + ',' + Y(v)).join(' ')}" ${OUT} stroke-linejoin="round"/>`);
   if (sh.path) {
@@ -229,12 +234,12 @@ const TEMPLATES = {
       pts.forEach((p, i) => {
         const pn = `Point ${i + 1} (${p.type})`, sh = SHAPES[p.type], isHook = p.type.startsWith('hook'), down = p.type !== 'hook-up';
         const cy = yOf(p.off), box = p.bh > 0 && p.bd > 0, bhp = p.bh * s, endX = Math.max(plateR + 6, plateL + p.bd * s);
-        const projMm = p.proj || sh.w, hMm = p.h || (isHook && box ? p.bh * .55 : sh.h);
+        const projMm = p.proj || sh.w, hMm = p.h || sh.h;
         if (p.off + Math.max(box ? p.bh : 0, hMm) / 2 > maxOff || p.off - Math.max(box ? p.bh : 0, hMm) / 2 < minOff)
           warns.push(`A ${p.type} at ${p.off}mm runs off the faceplate.`);
         if (box) sv.rect(plateR, cy - bhp / 2, endX - plateR, bhp, OUT);
         let by = cy; // a hook sits flush with the open end of its box
-        if (isHook && box) { const hp = Math.max(12, hMm * s); by = down ? cy + bhp / 2 - hp / 2 : cy - bhp / 2 + hp / 2; }
+        if (isHook && box) { const hp = ptSize(p.type, s, projMm, hMm).h; by = down ? cy + bhp / 2 - hp / 2 : cy - bhp / 2 + hp / 2; }
         const d = drawPoint(sv, plateL, by, p.type, s, projMm, hMm);
         { // every measure is registered, so each one can be shown or hidden from the Dimensions list
           if (box) sv.dimV(endX + 30, cy - bhp / 2, cy + bhp / 2, fmt(p.bh), 'r', pn + ' box height');
