@@ -235,7 +235,7 @@ const TEMPLATES = {
       }));
       pts.forEach((p, i) => {
         const pn = `Point ${i + 1} (${p.type})`, sh = SHAPES[p.type], isHook = p.type.startsWith('hook'), down = p.type !== 'hook-up';
-        const cy = yOf(p.off), box = p.bh > 0 && p.bd > 0, bhp = p.bh * s, endX = plateR + Math.max(24, p.bd * s * 1.8); // drawn deeper than true scale so the box reads clearly
+        const cy = yOf(p.off), box = p.bh > 0 && p.bd > 0, bhp = p.bh * s, endX = plateR + Math.max(20, p.bd * s * 1.4); // drawn deeper than true scale so the box reads clearly
         const projMm = p.proj || sh.w, hMm = p.h || sh.h; // hooks have h = 0: their height follows their width
         if (p.off + Math.max(box ? p.bh : 0, hMm) / 2 > maxOff || p.off - Math.max(box ? p.bh : 0, hMm) / 2 < minOff)
           warns.push(`A ${p.type} at ${p.off}mm runs off the faceplate.`);
