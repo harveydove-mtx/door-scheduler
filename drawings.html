@@ -146,9 +146,9 @@ const COMMON = [
 // Side-profile symbols. Coordinates are (u, v): u = distance out from the faceplate, v = vertical (down is +).
 // w = how far the part sticks out, h = its height, both in real mm (shown at least 12px so they stay visible on a long faceplate).
 const SHAPES = {
-  // straight arm out of the faceplate, then a pointed tooth whose tip turns back toward the door
-  hook:       { w: 23, h: 28, min: 16, path: (w, h) => { const th = h * .3, r = Math.min(h * .25, w * .4); return [['M', [0, -h/2]], ['L', [w - r, -h/2]], ['Q', [w, -h/2], [w, -h/2 + r]], ['L', [w, h * .05]], ['L', [w * .6, h/2]], ['L', [w * .74, h * .12]], ['L', [w * .74, -h/2 + th]], ['L', [0, -h/2 + th]], ['Z']]; } },
-  'hook-up':  { w: 23, h: 28, min: 16, flip: true, path: (w, h) => SHAPES.hook.path(w, h) },
+  // curved blade: thick where it leaves the faceplate, arcs outward and tapers to a point that curls down
+  hook:       { w: 23, h: 28, minW: 30, minH: 34, path: (w, h) => [['M', [0, -h/2]], ['C', [w * .65, -h/2], [w * 1.02, -h * .4], [w * .98, h * .05]], ['L', [w * .78, h/2]], ['Q', [w * .6, -h * .2], [0, -h/2 + h * .3]], ['Z']] },
+  'hook-up':  { w: 23, h: 28, minW: 30, minH: 34, flip: true, path: (w, h) => SHAPES.hook.path(w, h) },
   roller:     { w: 20, h: 16, custom: true },
   mushroom:   { w: 16, h: 18, poly: (w, h) => { const st = h * .16, c = h * .12, u = w * .5; return [[0, -st], [u, -st], [u, -h/2 + c], [u + c, -h/2], [w - c, -h/2], [w, -h/2 + c], [w, h/2 - c], [w - c, h/2], [u + c, h/2], [u, h/2 - c], [u, st], [0, st]]; } },
   pin:        { w: 14, h: 12, poly: (w, h) => { const a = h / 2, c = h * .22; return [[0, -a], [w - c, -a], [w, -a + c], [w, a - c], [w - c, a], [0, a]]; } },
@@ -157,8 +157,8 @@ const SHAPES = {
 };
 // Draws one locking part out of the faceplate's left face; returns its drawn size in px.
 function ptSize(type, s, wMm, hMm) {
-  const m = (SHAPES[type] || SHAPES.hook).min || 12;
-  return { w: Math.max(m, wMm * s), h: Math.max(m, hMm * s) };
+  const sh = SHAPES[type] || SHAPES.hook;
+  return { w: Math.max(sh.minW || 12, wMm * s), h: Math.max(sh.minH || 12, hMm * s) };
 }
 function drawPoint(sv, plateL, cy, type, s, wMm, hMm) {
   const sh = SHAPES[type] || SHAPES.hook, { w, h } = ptSize(type, s, wMm, hMm);
@@ -180,7 +180,7 @@ const TEMPLATES = {
   multi: {
     name: 'Multipoint lock',
     title: 'Multipoint Lock',
-    defaultHide: ['Point 3 (deadbolt) sticks out', 'Point 3 (deadbolt) height', 'Point 4 (hook-up) box height', 'Point 4 (hook-up) sticks out', 'Point 4 (hook-up) box depth'],
+    defaultHide: ['Case depth', 'Point 3 (deadbolt) sticks out', 'Point 3 (deadbolt) height', 'Point 4 (hook-up) box height', 'Point 4 (hook-up) sticks out', 'Point 4 (hook-up) box depth'],
     fields: [
       { sec: 'Faceplate' },
       { k: 'length', label: 'Overall faceplate length', type: 'num', def: 1770 },
@@ -273,6 +273,7 @@ const TEMPLATES = {
       const rn = [...(cylOn ? [{ abs: -cylOff }] : []), ...spins.filter(sp => sp.dim)].sort((a, b) => b.abs - a.abs);
       if (rn.length > 1) sv.chainV(cA, rn.map(n => yOf(n.abs)), rn.map(n => -n.abs), 'r', 'Cylinder / spindle chain');
       sv.dimV(cB, cTop, cTop + cH, fmt(num(v.caseH)), 'r', 'Case height');
+      sv.dimH(cTop + cH + 34, plateL, cx1, fmt(num(v.caseDepth)), 'b', 'r', 'Case depth');
       const hi = Math.max(0, ...pts.map(p => p.off)), lo = Math.min(0, ...pts.map(p => p.off));
       if (hi > 0) sv.dimV(cC, yOf(hi), datumY, fmt(hi), 'r', 'Datum to top point');
       if (lo < 0) sv.dimV(cC, datumY, yOf(lo), fmt(lo), 'r', 'Datum to bottom point');
