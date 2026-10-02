@@ -195,10 +195,6 @@ function faceBarView(sv, v, x0d, y0d) {
   sv.text(x0d + wd / 2, y0d - 62, 'FACE BAR', 'font-size="11" text-anchor="middle" fill="#666"');
   sv.add(`<path d="M${x0d} ${y0d + ld} L${x0d} ${y0d + rd} ${q(x0d, y0d, x0d + rd, y0d)} L${x0d + wd - rd} ${y0d} ${q(x0d + wd, y0d, x0d + wd, y0d + rd)} L${x0d + wd} ${y0d + ld} L${x0d + wd * .75} ${y0d + ld + 8} L${x0d + wd * .5} ${y0d + ld - 8} L${x0d + wd * .25} ${y0d + ld + 8} Z" ${OUT} stroke-linejoin="round"/>`);
   sv.dimH(y0d - 20, x0d, x0d + wd, fmt(fw), 't', 'r', 'Face bar width');
-  if (!sq && rd > 0 && sv.reg('Face bar corner radius', 'R' + fmt(num(v.faceR)))) {
-    sv.line(x0d + rd * .3, y0d + rd * .3, x0d - 18, y0d - 8, 'stroke="#e00000" stroke-width="1"');
-    sv.text(x0d - 22, y0d - 4, 'R' + fmt(num(v.faceR)), 'font-size="13" font-weight="bold" text-anchor="end" paint-order="stroke" stroke="#fff" stroke-width="3"');
-  }
   sv.text(x0d + wd / 2, y0d + ld + 36, sq ? 'Square ended' : 'Radius ended', 'font-size="12" text-anchor="middle" fill="#444"');
   return x0d + wd + 110;
 }
@@ -206,7 +202,7 @@ const FACE_FIELDS = [
   { sec: 'Faceplate end' },
   { k: 'faceType', label: 'Face bar type', type: 'select', opts: ['radius', 'square'], def: 'radius' },
   { k: 'faceW', label: 'Face bar width', type: 'num', def: 20 },
-  { k: 'faceR', label: 'Face bar corner radius (radius type)', type: 'num', def: 5 },
+  { k: 'faceR', label: 'Face bar corner radius (radius type, shape only)', type: 'num', def: 5 },
   { k: 'faceView', label: 'Show face bar view', type: 'check', def: true },
 ];
 
@@ -315,7 +311,7 @@ const TEMPLATES = {
       { k: 'forendW', label: 'Faceplate thickness shown in the side view', type: 'num', def: 10 },
       { k: 'faceType', label: 'Face bar type', type: 'select', opts: ['radius', 'square'], def: 'radius' },
       { k: 'faceW', label: 'Face bar width', type: 'num', def: 20 },
-      { k: 'faceR', label: 'Face bar corner radius (radius type)', type: 'num', def: 5 },
+      { k: 'faceR', label: 'Face bar corner radius (radius type, shape only)', type: 'num', def: 5 },
       { k: 'faceView', label: 'Show face bar view', type: 'check', def: true },
       { hint: 'The datum is the reference line that locking points are measured from (offsets are positive above it, negative below). With the datum set to 0 the locking points stay centred on the faceplate when you change its length. If an alternative length is set, the faceplate is drawn at the longer one.' },
       { sec: 'Gearbox case' },
