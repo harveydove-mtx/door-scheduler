@@ -186,6 +186,122 @@ function drawPoint(sv, plateL, cy, type, s, wMm, hMm, flip) {
   return { w, h };
 }
 
+// Enlarged view of the top end of a face bar: width, and whether the end is radius or square. Returns the right-hand extent used (0 if not shown).
+function faceBarView(sv, v, x0d, y0d) {
+  const fw = num(v.faceW);
+  if (v.faceView === false || fw <= 0) return 0;
+  const k = 3, wd = fw * k, ld = 230, sq = v.faceType === 'square', rd = sq ? 0 : Math.min(Math.max(num(v.faceR), 0), fw / 2) * k;
+  const q = (cx, cy, ex, ey) => rd > 0 ? `Q${cx} ${cy} ${ex} ${ey}` : `L${ex} ${ey}`;
+  sv.text(x0d + wd / 2, y0d - 62, 'FACE BAR', 'font-size="11" text-anchor="middle" fill="#666"');
+  sv.add(`<path d="M${x0d} ${y0d + ld} L${x0d} ${y0d + rd} ${q(x0d, y0d, x0d + rd, y0d)} L${x0d + wd - rd} ${y0d} ${q(x0d + wd, y0d, x0d + wd, y0d + rd)} L${x0d + wd} ${y0d + ld} L${x0d + wd * .75} ${y0d + ld + 8} L${x0d + wd * .5} ${y0d + ld - 8} L${x0d + wd * .25} ${y0d + ld + 8} Z" ${OUT} stroke-linejoin="round"/>`);
+  sv.dimH(y0d - 20, x0d, x0d + wd, fmt(fw), 't', 'r', 'Face bar width');
+  if (!sq && rd > 0 && sv.reg('Face bar corner radius', 'R' + fmt(num(v.faceR)))) {
+    sv.line(x0d + rd * .3, y0d + rd * .3, x0d - 18, y0d - 8, 'stroke="#e00000" stroke-width="1"');
+    sv.text(x0d - 22, y0d - 4, 'R' + fmt(num(v.faceR)), 'font-size="13" font-weight="bold" text-anchor="end" paint-order="stroke" stroke="#fff" stroke-width="3"');
+  }
+  sv.text(x0d + wd / 2, y0d + ld + 36, sq ? 'Square ended' : 'Radius ended', 'font-size="12" text-anchor="middle" fill="#444"');
+  return x0d + wd + 110;
+}
+const FACE_FIELDS = [
+  { sec: 'Faceplate end' },
+  { k: 'faceType', label: 'Face bar type', type: 'select', opts: ['radius', 'square'], def: 'radius' },
+  { k: 'faceW', label: 'Face bar width', type: 'num', def: 20 },
+  { k: 'faceR', label: 'Face bar corner radius (radius type)', type: 'num', def: 5 },
+  { k: 'faceView', label: 'Show face bar view', type: 'check', def: true },
+];
+
+/* ---------- lock cases: multipoint gearbox (side view, long faceplate) and overnight lock (front view) ---------- */
+const LOCK_FIELDS = g => [
+  { sec: g ? 'Case and faceplate' : 'Case' },
+  { k: 'caseH', label: g ? 'Case height' : 'Overall height (case and forend)', type: 'num', def: g ? 194 : 220 },
+  ...(g ? [
+    { k: 'faceH', label: 'Faceplate length', type: 'num', def: 292 },
+    { k: 'capTop', label: 'Faceplate top to case top (0 = centre the case)', type: 'num', def: 62 }] : []),
+  { k: 'backset', label: 'Backset (forend to spindle centreline)', type: 'num', def: 35 },
+  { k: 'rearDist', label: 'Spindle centreline to case rear', type: 'num', def: g ? 15 : 20 },
+  { sec: 'Spindle and cylinder' },
+  { k: 'topS', label: g ? 'Case top to spindle' : 'Top to spindle', type: 'num', def: g ? 71 : 100 },
+  { k: 'C', label: 'Spindle to cylinder centre', type: 'num', def: 92 },
+  { k: 'cylD', label: 'Cylinder cut-out diameter', type: 'num', def: 17 },
+  ...(g ? [{ k: 'details', label: 'Show the hole, slot and oval details', type: 'check', def: true }] : [
+    { sec: 'Slot and hole above the spindle' },
+    { k: 'slotEnd', label: 'Slot end to spindle', type: 'num', def: 65 },
+    { k: 'slotLen', label: 'Slot length', type: 'num', def: 32 },
+    { k: 'holeOff', label: 'Hole to spindle', type: 'num', def: 44 }]),
+  { sec: 'Bolts' },
+  { hint: 'Bolt positions are the centre of each bolt, measured from the spindle: positive = above, negative = below.' },
+  { k: 'proj', label: 'Bolt projection from the forend', type: 'num', def: g ? 25 : 12 },
+  { k: 'latchOff', label: 'Latch centre from spindle', type: 'num', def: g ? 18 : 42 },
+  { k: 'latchH', label: 'Latch height', type: 'num', def: g ? 20 : 27 },
+  { k: 'deadOff', label: 'Deadbolt centre from spindle', type: 'num', def: g ? -79 : -52 },
+  { k: 'deadH', label: 'Deadbolt height', type: 'num', def: g ? 44 : 40 },
+];
+function lockDraw(v, kind) {
+  const g = kind === 'gear', warns = [], H = num(v.caseH), FH = g ? num(v.faceH) : H;
+  if (H <= 0 || FH <= 0) throw new Error(g ? 'Enter a positive case height and faceplate length.' : 'Enter a positive overall height.');
+  const sv = new Sv(), s = Math.min(3, 540 / FH), top = 70, proj = num(v.proj), bp = Math.max(proj * s, 14), fw = 7;
+  const capTop = !g ? 0 : num(v.capTop) > 0 ? num(v.capTop) : Math.max(0, (FH - H) / 2);
+  if (g && capTop + H > FH + .01) warns.push('The case runs past the end of the faceplate.');
+  const xF = bp + (g ? 200 : 90), xC = xF + num(v.backset) * s, caseR = xC + Math.max(num(v.rearDist) * s, 6);
+  const caseTop = top + capTop * s, caseBot = caseTop + H * s, faceBot = top + FH * s, yS = caseTop + num(v.topS) * s, yC = yS + num(v.C) * s;
+  const r = num(v.cylD) / 2 * s, ex = 'stroke="#888" stroke-width=".8"';
+  if (yS < caseTop || yS > caseBot) warns.push('The spindle is outside the case.');
+  if (yC + r * 2.6 > caseBot + 1) warns.push('The cylinder cut-out runs past the bottom of the case.');
+  // case, forend and centrelines
+  sv.rect(xF + fw, caseTop, caseR - xF - fw, H * s, OUT);
+  sv.rect(xF, top, fw, FH * s, OUT);
+  sv.line(xC, caseTop - 8, xC, caseBot + 14, CEN);
+  // bolts (latch above, deadbolt below by default)
+  const bolt = (off, h) => { const y = yS - off * s, hp = Math.max(8, h * s); sv.rect(xF - bp, y - hp / 2, bp, hp, OUT); return [y - hp / 2, y + hp / 2]; };
+  const lat = bolt(num(v.latchOff), num(v.latchH)), ded = bolt(num(v.deadOff), num(v.deadH));
+  if (lat[1] > ded[0] && ded[1] > lat[0]) warns.push('The latch and deadbolt overlap.');
+  // spindle, cylinder
+  const q = Math.max(10, 10 * s);
+  if (g) sv.circle(xC, yS, q * .95, OUT);
+  sv.rect(xC - q / 2, yS - q / 2, q, q, OUT);
+  sv.line(xC - 30, yS, xC + 30, yS, CEN);
+  sv.rect(xC - r * .68, yC, r * 1.36, r * 2.6, OUT, r * .68); sv.circle(xC, yC, r, OUT); sv.line(xC - r - 10, yC, xC + r + 10, yC, CEN);
+  if (!g) {
+    const sw = Math.max(7, 6 * s), sl = num(v.slotLen) * s, sy = yS - (num(v.slotEnd) + num(v.slotLen)) * s;
+    sv.rect(xC - sw / 2, sy, sw, sl, OUT, sw / 2);
+    sv.circle(xC, yS - num(v.holeOff) * s, Math.max(3.5, 3 * s), OUT);
+  } else if (v.details !== false) {
+    sv.rect(xC - Math.max(3, 2.5 * s), yS - 62 * s, Math.max(6, 5 * s), 12 * s, OUT, Math.max(3, 2.5 * s));
+    sv.circle(xC, yS + 26 * s, Math.max(4, 3.5 * s), OUT);
+    sv.rect(xC + 11 * s, yS + 18 * s, Math.max(4, 3.5 * s), 28 * s, OUT);
+  }
+
+  // dimensions
+  const cA = caseR + 40, cB = cA + 80, cC = cB + 80, cD = cC + 80, ext = caseR + 2;
+  if (g) {
+    sv.dimV(cA, caseTop, yS, fmt(num(v.topS)), 'r', 'Case top to spindle', ext);
+    sv.dimV(cA, yS, yC, fmt(num(v.C)), 'r', 'Spindle to cylinder', ext);
+    sv.dimV(cB, caseTop, caseBot, fmt(H), 'r', 'Case height', ext);
+    sv.dimV(xF - bp - 100, top, faceBot, fmt(FH), 'l', 'Faceplate length', xF);
+  } else {
+    sv.dimV(cA, yS - num(v.holeOff) * s, yS, fmt(num(v.holeOff)), 'r', 'Hole to spindle', ext);
+    sv.dimV(cA, yS, yC, fmt(num(v.C)), 'r', 'Spindle to cylinder', ext);
+    sv.dimV(cB, yS - num(v.slotEnd) * s, yS, fmt(num(v.slotEnd)), 'r', 'Slot end to spindle', ext);
+    sv.dimV(cC, caseTop, yS, fmt(num(v.topS)), 'r', 'Top to spindle', ext);
+    sv.dimV(cD, caseTop, caseBot, fmt(H), 'r', 'Overall height', ext);
+  }
+  const gap = (num(v.latchOff) - num(v.latchH) / 2) - (num(v.deadOff) + num(v.deadH) / 2);
+  if (gap > 0) sv.dimV(xF - bp - 26, lat[1], ded[0], fmt(gap), 'r', 'Latch to deadbolt gap', xF - bp);
+  if (g) sv.dimH(ded[1] + 28, xF - bp, xF, fmt(proj), 'b', 'l', 'Bolt projection');
+  else {
+    sv.dimH(top - 34, xF - bp, xF, fmt(proj), 't', 'l', 'Bolt projection');
+    if (!sv.hide['Bolt projection']) sv.line(xF - bp, top - 14, xF - bp, lat[0], ex);
+  }
+  const yb = Math.max(caseBot, faceBot) + 40;
+  sv.dimH(yb, xC, caseR, fmt(num(v.rearDist)), 'b', 'r', 'Spindle centreline to case rear');
+  sv.dimH(yb + 44, xF, xC, fmt(num(v.backset)), 'b', 'r', 'Backset');
+
+  const fbx = g ? faceBarView(sv, v, cB + 120, top + 30) : 0;
+  const w = Math.max(560, (g ? cB : cD) + 100, fbx), ty = yb + 100;
+  sv.titleBlock(w, ty, v);
+  return { svg: sv.finish(w, ty + 84), warns, dims: sv.dims };
+}
+
 const TEMPLATES = {
   multi: {
     name: 'Multipoint lock',
@@ -302,23 +418,9 @@ const TEMPLATES = {
       if (lo < 0) sv.dimV(cC, datumY, yOf(lo), fmt(lo), 'r', 'Datum to bottom point');
       sv.dimV(cD, top, top + L * s, (num(v.lengthAlt) > 0 && num(v.length) > 0 && num(v.lengthAlt) !== num(v.length) ? fmt(num(v.length)) + '/' + fmt(num(v.lengthAlt)) : fmt(L)), 'r', 'Overall length');
 
-      // face bar: enlarged view of the end of the bar showing its width and whether it is radius or square ended
+      // face bar: enlarged view of the top end of the bar showing its width and whether it is radius or square ended
       let w = cD + (num(v.lengthAlt) > 0 ? 130 : 80);
-      const fw = num(v.faceW);
-      if (v.faceView !== false && fw > 0) {
-        const k = 3, wd = fw * k, ld = 230, sq = v.faceType === 'square', rd = sq ? 0 : Math.min(Math.max(num(v.faceR), 0), fw / 2) * k;
-        const x0d = cD + (num(v.lengthAlt) > 0 ? 160 : 110), y0d = top + 30;
-        const q = (cx, cy, ex, ey) => rd > 0 ? `Q${cx} ${cy} ${ex} ${ey}` : `L${ex} ${ey}`;
-        sv.text(x0d + wd / 2, y0d - 62, 'FACE BAR', 'font-size="11" text-anchor="middle" fill="#666"');
-        sv.add(`<path d="M${x0d} ${y0d + ld} L${x0d} ${y0d + rd} ${q(x0d, y0d, x0d + rd, y0d)} L${x0d + wd - rd} ${y0d} ${q(x0d + wd, y0d, x0d + wd, y0d + rd)} L${x0d + wd} ${y0d + ld} L${x0d + wd * .75} ${y0d + ld + 8} L${x0d + wd * .5} ${y0d + ld - 8} L${x0d + wd * .25} ${y0d + ld + 8} Z" ${OUT} stroke-linejoin="round"/>`);
-        sv.dimH(y0d - 20, x0d, x0d + wd, fmt(fw), 't', 'r', 'Face bar width');
-        if (!sq && rd > 0 && sv.reg('Face bar corner radius', 'R' + fmt(num(v.faceR)))) {
-          sv.line(x0d + rd * .3, y0d + rd * .3, x0d - 18, y0d - 8, 'stroke="#e00000" stroke-width="1"');
-          sv.text(x0d - 22, y0d - 4, 'R' + fmt(num(v.faceR)), 'font-size="13" font-weight="bold" text-anchor="end" paint-order="stroke" stroke="#fff" stroke-width="3"');
-        }
-        sv.text(x0d + wd / 2, y0d + ld + 36, sq ? 'Square ended' : 'Radius ended', 'font-size="12" text-anchor="middle" fill="#444"');
-        w = Math.max(w, x0d + wd + 110);
-      }
+      w = Math.max(w, faceBarView(sv, v, cD + (num(v.lengthAlt) > 0 ? 160 : 110), top + 30));
       const bottom = top + L * s + 45;
       sv.titleBlock(w, bottom, v);
       return { svg: sv.finish(w, bottom + 84), warns, dims: sv.dims };
@@ -439,6 +541,22 @@ const TEMPLATES = {
       sv.titleBlock(w, ty, v);
       return { svg: sv.finish(w, ty + 84), warns, dims: sv.dims };
     },
+  },
+
+  gearbox: {
+    name: 'Multipoint gearbox',
+    title: 'Multipoint Gearbox',
+    defaultHide: ['Backset'],
+    fields: [...LOCK_FIELDS(true), ...FACE_FIELDS],
+    draw(v) { return lockDraw(v, 'gear'); },
+  },
+
+  overnight: {
+    name: 'Overnight lock',
+    title: 'Overnight Lock',
+    defaultHide: ['Backset', 'Latch to deadbolt gap'],
+    fields: LOCK_FIELDS(false),
+    draw(v) { return lockDraw(v, 'over'); },
   },
 
   hinge: {
