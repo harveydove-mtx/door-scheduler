@@ -175,6 +175,7 @@ const TEMPLATES = {
   multi: {
     name: 'Multipoint lock',
     title: 'Multipoint Lock',
+    defaultHide: ['Point 3 (deadbolt) sticks out', 'Point 3 (deadbolt) height', 'Point 4 (hook-up) box height', 'Point 4 (hook-up) sticks out', 'Point 4 (hook-up) box depth'],
     fields: [
       { sec: 'Faceplate' },
       { k: 'length', label: 'Overall faceplate length', type: 'num', def: 1770 },
@@ -198,19 +199,18 @@ const TEMPLATES = {
         def: [{ off: 92, size: 8, dim: true }],
         add: { off: 0, size: 8, dim: true } },
       { sec: 'Locking points' },
-      { hint: 'Offset = centre of the part from the datum. Out = how far it sticks out of the faceplate and Height = its height (0 = standard size). Box H and Box D draw a box behind the faceplate (0 = no box). Chain adds it to the left-hand offset chain; Size dims shows its out, height and box dimensions.' },
+      { hint: 'Offset = centre of the part from the datum. Out = how far it sticks out of the faceplate and Height = its height (0 = standard size). Box H and Box D draw a box behind the faceplate (0 = no box). Chain adds it to the left-hand offset chain. Each size is listed under “Dimensions shown” at the bottom, where you can hide any of them.' },
       { k: 'points', type: 'list', cols: [
           { k: 'type', label: 'Type', type: 'select', opts: Object.keys(SHAPES), wide: true },
           { k: 'off', label: 'Offset', type: 'num' }, { k: 'proj', label: 'Out', type: 'num' },
           { k: 'h', label: 'Height', type: 'num' }, { k: 'bh', label: 'Box H', type: 'num' },
-          { k: 'bd', label: 'Box D', type: 'num' }, { k: 'chain', label: 'Chain', type: 'check' },
-          { k: 'sd', label: 'Size dims', type: 'check' }],
+          { k: 'bd', label: 'Box D', type: 'num' }, { k: 'chain', label: 'Chain', type: 'check' }],
         def: [
-          { type: 'hook', off: 720, proj: 23, h: 0, bh: 113, bd: 45, chain: false, sd: true },
-          { type: 'latch', off: 60, proj: 20, h: 10, bh: 0, bd: 0, chain: false, sd: true },
-          { type: 'deadbolt', off: -35, proj: 20, h: 30, bh: 0, bd: 0, chain: false, sd: false },
-          { type: 'hook-up', off: -770, proj: 23, h: 0, bh: 113, bd: 45, chain: false, sd: false }],
-        add: { type: 'hook', off: 0, proj: 0, h: 0, bh: 0, bd: 0, chain: false, sd: true } },
+          { type: 'hook', off: 720, proj: 23, h: 0, bh: 113, bd: 45, chain: false },
+          { type: 'latch', off: 60, proj: 20, h: 10, bh: 0, bd: 0, chain: false },
+          { type: 'deadbolt', off: -35, proj: 20, h: 30, bh: 0, bd: 0, chain: false },
+          { type: 'hook-up', off: -770, proj: 23, h: 0, bh: 113, bd: 45, chain: false }],
+        add: { type: 'hook', off: 0, proj: 0, h: 0, bh: 0, bd: 0, chain: false } },
     ],
     draw(v) {
       const L = num(v.length), warns = [];
@@ -224,7 +224,7 @@ const TEMPLATES = {
       const maxOff = num(v.topToDatum), minOff = -(L - num(v.topToDatum));
       const pts = v.points.map(p => ({
         type: SHAPES[p.type] ? p.type : 'hook', off: num(p.off), proj: num(p.proj), h: num(p.h), bh: num(p.bh), bd: num(p.bd),
-        chain: !!(p.chain ?? p.dim), sd: !!p.sd,
+        chain: !!(p.chain ?? p.dim),
       }));
       pts.forEach((p, i) => {
         const pn = `Point ${i + 1} (${p.type})`, sh = SHAPES[p.type], isHook = p.type.startsWith('hook'), down = p.type !== 'hook-up';
@@ -236,7 +236,7 @@ const TEMPLATES = {
         let by = cy; // a hook sits flush with the open end of its box
         if (isHook && box) { const hp = Math.max(12, hMm * s); by = down ? cy + bhp / 2 - hp / 2 : cy - bhp / 2 + hp / 2; }
         const d = drawPoint(sv, plateL, by, p.type, s, projMm, hMm);
-        if (p.sd) {
+        { // every measure is registered, so each one can be shown or hidden from the Dimensions list
           if (box) sv.dimV(endX + 30, cy - bhp / 2, cy + bhp / 2, fmt(p.bh), 'r', pn + ' box height');
           if (p.h > 0) sv.dimV(plateL - d.w - 28, by - d.h / 2, by + d.h / 2, fmt(p.h), 'l', pn + ' height');
           const half = Math.max(box ? bhp : 0, d.h) / 2, dy = cy + (p.off > 0 ? half + 28 : -half - 28);
@@ -444,15 +444,26 @@ function defaults(key) {
   const v = {};
   [...COMMON, ...TEMPLATES[key].fields].forEach(f => { if (f.k) v[f.k] = clone(f.def ?? ''); });
   v.title = TEMPLATES[key].title;
-  v.hide = {};
+  v.hide = Object.fromEntries((TEMPLATES[key].defaultHide || []).map(k => [k, true]));
   return v;
 }
 let cur = LS.get('mtxdraw:last'); if (!TEMPLATES[cur]) cur = 'multi';
 let state = {};
+// Older saves had one "Size dims" tick per point; turn an unticked one into hidden dimensions.
+function migrate(v) {
+  if (!v.hide) v.hide = {};
+  if (Array.isArray(v.points) && v.points.some(p => 'sd' in p)) {
+    v.points.forEach((p, i) => {
+      if (p.sd === false) [' box height', ' height', ' sticks out', ' box depth'].forEach(m => { v.hide[`Point ${i + 1} (${p.type})` + m] = true; });
+      delete p.sd;
+    });
+  }
+  return v;
+}
 function load(key) {
   let v = defaults(key);
   try { Object.assign(v, JSON.parse(LS.get('mtxdraw:' + key) || '{}')); } catch (e) {}
-  state = v;
+  state = migrate(v);
 }
 function persist() { LS.set('mtxdraw:' + cur, JSON.stringify(state)); LS.set('mtxdraw:last', cur); }
 
@@ -577,7 +588,7 @@ $('fileIn').onchange = e => {
   f.text().then(t => {
     const d = JSON.parse(t);
     if (!TEMPLATES[d.template]) throw new Error('Unknown template');
-    cur = d.template; state = Object.assign(defaults(cur), d.values);
+    cur = d.template; state = migrate(Object.assign(defaults(cur), d.values));
     $('tplSel').value = cur; buildPanel(); render();
   }).catch(err => alert('Could not load file: ' + err.message)).finally(() => { e.target.value = ''; });
 };
