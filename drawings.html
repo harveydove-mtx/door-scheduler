@@ -779,13 +779,22 @@ $('bPng').onclick = async () => {
   try { const img = await svgImage(), [w, h] = svgSize(), [c, g] = whiteCanvas(w * 2, h * 2); g.drawImage(img, 0, 0, c.width, c.height); await download(slug() + '.png', await canvasBlob(c)); }
   catch (e) { note(e.message); }
 };
-// Web export: exactly 1000 x 1000 px, white background, the drawing scaled to fit and centred with a 30px margin.
+// Web export: exactly 1000 x 1000 px on white. The drawing's spare margin is trimmed first, then it is scaled to fill the square (24px padding) and centred.
 $('bWeb').onclick = async () => {
   if (!lastSvg) return;
   try {
-    const img = await svgImage(), [w, h] = svgSize(), [c, g] = whiteCanvas(1000, 1000), k = Math.min(940 / w, 940 / h);
-    g.drawImage(img, (1000 - w * k) / 2, (1000 - h * k) / 2, w * k, h * k);
-    await download(slug() + '-1000x1000.png', await canvasBlob(c));
+    const img = await svgImage(), [w, h] = svgSize(), R = 3, [work, wg] = whiteCanvas(w * R, h * R);
+    wg.drawImage(img, 0, 0, work.width, work.height);
+    const px = wg.getImageData(0, 0, work.width, work.height).data;
+    let x0 = work.width, y0 = work.height, x1 = -1, y1 = -1;
+    for (let y = 0; y < work.height; y++) for (let x = 0; x < work.width; x++) {
+      const i = (y * work.width + x) * 4;
+      if (px[i] < 245 || px[i + 1] < 245 || px[i + 2] < 245) { if (x < x0) x0 = x; if (x > x1) x1 = x; if (y < y0) y0 = y; if (y > y1) y1 = y; }
+    }
+    if (x1 < 0) { x0 = 0; y0 = 0; x1 = work.width - 1; y1 = work.height - 1; }
+    const sw = x1 - x0 + 1, sh = y1 - y0 + 1, [c, g] = whiteCanvas(1000, 1000), k = Math.min(952 / sw, 952 / sh), dw = sw * k, dh = sh * k;
+    g.drawImage(work, x0, y0, sw, sh, (1000 - dw) / 2, (1000 - dh) / 2, dw, dh);
+    await download(fileBase() + '_drawing.png', await canvasBlob(c));
   } catch (e) { note(e.message); }
 };
 // PDF: A4, portrait or landscape to suit the drawing, scaled to fit with a 10mm margin (high-resolution image of the drawing).
