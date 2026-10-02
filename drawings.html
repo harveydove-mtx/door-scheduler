@@ -296,7 +296,7 @@ function lockDraw(v, kind) {
   sv.dimH(yb, xC, caseR, fmt(num(v.rearDist)), 'b', 'r', 'Spindle centreline to case rear');
   sv.dimH(yb + 44, xF, xC, fmt(num(v.backset)), 'b', 'r', 'Backset');
 
-  const fbx = g ? faceBarView(sv, v, cB + 120, top + 30) : 0;
+  const fbx = faceBarView(sv, v, (g ? cB : cD) + 120, top + 30); // only shown when the template has face bar settings
   const w = Math.max(560, (g ? cB : cD) + 100, fbx), ty = yb + 100;
   sv.titleBlock(w, ty, v);
   return { svg: sv.finish(w, ty + 84), warns, dims: sv.dims };
@@ -543,20 +543,21 @@ const TEMPLATES = {
     },
   },
 
-  gearbox: {
+  // Front view with the slot and hole above the spindle (the MPL gearbox) and side view with the long faceplate (the overnight lock).
+  mplgearbox: {
     name: 'Multipoint gearbox',
     title: 'Multipoint Gearbox',
-    defaultHide: ['Backset'],
-    fields: [...LOCK_FIELDS(true), ...FACE_FIELDS],
-    draw(v) { return lockDraw(v, 'gear'); },
+    defaultHide: ['Backset', 'Latch to deadbolt gap'],
+    fields: [...LOCK_FIELDS(false), ...FACE_FIELDS],
+    draw(v) { return lockDraw(v, 'over'); },
   },
 
-  overnight: {
+  overnightlock: {
     name: 'Overnight lock',
     title: 'Overnight Lock',
-    defaultHide: ['Backset', 'Latch to deadbolt gap'],
-    fields: LOCK_FIELDS(false),
-    draw(v) { return lockDraw(v, 'over'); },
+    defaultHide: ['Backset'],
+    fields: LOCK_FIELDS(true),
+    draw(v) { return lockDraw(v, 'gear'); },
   },
 
   hinge: {
