@@ -148,8 +148,8 @@ const COMMON = [
 const SHAPES = {
   // traced from a manufacturer drawing: a wide arc sweeps out of the faceplate to an angled beak,
   // steps back in with a notch, and returns along a short arm. Roughly square, so height follows width.
-  hook:       { w: 23, h: 0, minW: 30, aspect: 1.05, path: (w, h) => { const P = (U, V) => [U * w, (V - .5) * h]; return [['M', P(0, 0)], ['C', P(.45, .02), P(.9, .35), P(1, .8)], ['L', P(.66, 1)], ['L', P(.53, 1)], ['L', P(.51, .69)], ['Q', P(.25, .68), P(0, .55)], ['Z']]; } },
-  'hook-up':  { w: 23, h: 0, minW: 30, aspect: 1.05, flip: true, path: (w, h) => SHAPES.hook.path(w, h) },
+  hook:       { w: 23, h: 0, minW: 24, aspect: 1.07, path: (w, h) => { const P = (U, V) => [U * w, (V - .5) * h]; return [['M', P(0, 0)], ['C', P(.45, .02), P(.9, .35), P(1, .8)], ['L', P(.66, 1)], ['L', P(.53, 1)], ['L', P(.51, .69)], ['Q', P(.25, .68), P(0, .55)], ['Z']]; } },
+  'hook-up':  { w: 23, h: 0, minW: 24, aspect: 1.07, flip: true, path: (w, h) => SHAPES.hook.path(w, h) },
   roller:     { w: 20, h: 16, custom: true },
   mushroom:   { w: 16, h: 18, poly: (w, h) => { const st = h * .16, c = h * .12, u = w * .5; return [[0, -st], [u, -st], [u, -h/2 + c], [u + c, -h/2], [w - c, -h/2], [w, -h/2 + c], [w, h/2 - c], [w - c, h/2], [u + c, h/2], [u, h/2 - c], [u, st], [0, st]]; } },
   pin:        { w: 14, h: 12, poly: (w, h) => { const a = h / 2, c = h * .22; return [[0, -a], [w - c, -a], [w, -a + c], [w, a - c], [w - c, a], [0, a]]; } },
@@ -188,7 +188,7 @@ const TEMPLATES = {
       { k: 'length', label: 'Overall faceplate length', type: 'num', def: 1770 },
       { k: 'lengthAlt', label: 'Alternative overall length (0 = none)', type: 'num', def: 2100 },
       { k: 'topToDatum', label: 'Top of faceplate to datum', type: 'num', def: 785 },
-      { k: 'forendW', label: 'Faceplate width (drawn)', type: 'num', def: 20 },
+      { k: 'forendW', label: 'Faceplate width (drawn)', type: 'num', def: 10 },
       { hint: 'The datum is the reference line that locking points are measured from (offsets are positive above it, negative below).' },
       { sec: 'Gearbox case' },
       { k: 'caseH', label: 'Case height', type: 'num', def: 185 },
@@ -235,7 +235,7 @@ const TEMPLATES = {
       }));
       pts.forEach((p, i) => {
         const pn = `Point ${i + 1} (${p.type})`, sh = SHAPES[p.type], isHook = p.type.startsWith('hook'), down = p.type !== 'hook-up';
-        const cy = yOf(p.off), box = p.bh > 0 && p.bd > 0, bhp = p.bh * s, endX = plateR + Math.max(22, p.bd * s * 1.6); // drawn deeper than true scale so the box reads clearly
+        const cy = yOf(p.off), box = p.bh > 0 && p.bd > 0, bhp = p.bh * s * .73, endX = plateL + Math.max(p.bd * s * .85, pw + 12); // box proportions measured from the original drawings (schematic, not true scale)
         const projMm = p.proj || sh.w, hMm = p.h || sh.h; // hooks have h = 0: their height follows their width
         if (p.off + Math.max(box ? p.bh : 0, hMm) / 2 > maxOff || p.off - Math.max(box ? p.bh : 0, hMm) / 2 < minOff)
           warns.push(`A ${p.type} at ${p.off}mm runs off the faceplate.`);
@@ -452,6 +452,7 @@ function defaults(key) {
   const v = {};
   [...COMMON, ...TEMPLATES[key].fields].forEach(f => { if (f.k) v[f.k] = clone(f.def ?? ''); });
   v.title = TEMPLATES[key].title;
+  v.ver = 2;
   v.hide = Object.fromEntries((TEMPLATES[key].defaultHide || []).map(k => [k, true]));
   return v;
 }
@@ -468,9 +469,11 @@ function migrate(v) {
   }
   return v;
 }
+// Saves from before the faceplate default changed from 20 to 10 get the new width once.
+function fixOld(sv) { if (sv && !sv.ver && Number(sv.forendW) === 20) sv.forendW = 10; return sv; }
 function load(key) {
   let v = defaults(key);
-  try { Object.assign(v, JSON.parse(LS.get('mtxdraw:' + key) || '{}')); } catch (e) {}
+  try { Object.assign(v, fixOld(JSON.parse(LS.get('mtxdraw:' + key) || '{}'))); } catch (e) {}
   state = migrate(v);
 }
 function persist() { LS.set('mtxdraw:' + cur, JSON.stringify(state)); LS.set('mtxdraw:last', cur); }
@@ -596,7 +599,7 @@ $('fileIn').onchange = e => {
   f.text().then(t => {
     const d = JSON.parse(t);
     if (!TEMPLATES[d.template]) throw new Error('Unknown template');
-    cur = d.template; state = migrate(Object.assign(defaults(cur), d.values));
+    cur = d.template; state = migrate(Object.assign(defaults(cur), fixOld(d.values)));
     $('tplSel').value = cur; buildPanel(); render();
   }).catch(err => alert('Could not load file: ' + err.message)).finally(() => { e.target.value = ''; });
 };
