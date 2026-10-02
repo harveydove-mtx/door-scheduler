@@ -186,9 +186,9 @@ const TEMPLATES = {
       { sec: 'Faceplate' },
       { k: 'length', label: 'Overall faceplate length', type: 'num', def: 1770 },
       { k: 'lengthAlt', label: 'Alternative overall length (0 = none)', type: 'num', def: 2100 },
-      { k: 'topToDatum', label: 'Top of faceplate to datum', type: 'num', def: 785 },
+      { k: 'topToDatum', label: 'Top of faceplate to datum (0 = centre the locking points)', type: 'num', def: 0 },
       { k: 'forendW', label: 'Faceplate width (drawn)', type: 'num', def: 10 },
-      { hint: 'The datum is the reference line that locking points are measured from (offsets are positive above it, negative below).' },
+      { hint: 'The datum is the reference line that locking points are measured from (offsets are positive above it, negative below). With the datum set to 0 the locking points stay centred on the faceplate when you change its length. If an alternative length is set, the faceplate is drawn at the longer one.' },
       { sec: 'Gearbox case' },
       { k: 'caseH', label: 'Case height', type: 'num', def: 185 },
       { k: 'caseTop', label: 'Case top above datum', type: 'num', def: 92 },
@@ -220,15 +220,19 @@ const TEMPLATES = {
         add: { type: 'hook', off: 0, proj: 0, h: 0, bh: 0, bd: 0, chain: false, pos: 'bottom', flip: false } },
     ],
     draw(v) {
-      const L = num(v.length), warns = [];
+      const L = Math.max(num(v.length), num(v.lengthAlt)), warns = [];
       if (L <= 0) throw new Error('Enter a positive faceplate length.');
       const sv = new Sv(), s = Math.min(2, 880 / L), top = 70, plateL = 210;
       const pw = Math.max(4, num(v.forendW) * s), plateR = plateL + pw;
-      const datumY = top + num(v.topToDatum) * s, yOf = o => datumY - o * s;
+      // datum: as typed, or (0) centred so the top and bottom margins around the locking points are equal
+      const ext = v.points.map(p => ({ hi: num(p.off) + Math.max(num(p.bh), num(p.h)) / 2, lo: num(p.off) - Math.max(num(p.bh), num(p.h)) / 2 }));
+      const hiAll = Math.max(0, ...ext.map(e => e.hi)), loAll = Math.min(0, ...ext.map(e => e.lo));
+      const T = num(v.topToDatum) > 0 ? num(v.topToDatum) : (L + hiAll + loAll) / 2;
+      const datumY = top + T * s, yOf = o => datumY - o * s;
       sv.rect(plateL, top, pw, L * s, OUT);
 
       // locking points, each with an optional box behind the faceplate
-      const maxOff = num(v.topToDatum), minOff = -(L - num(v.topToDatum));
+      const maxOff = T, minOff = -(L - T);
       const pts = v.points.map(p => ({
         type: SHAPES[p.type] ? p.type : 'hook', off: num(p.off), proj: num(p.proj), h: num(p.h), bh: num(p.bh), bd: num(p.bd),
         chain: !!(p.chain ?? p.dim), pos: p.pos || (p.type === 'hook-up' ? 'top' : 'bottom'), flip: p.type === 'hook-up' ? true : !!p.flip,
@@ -282,7 +286,7 @@ const TEMPLATES = {
       const hi = Math.max(0, ...pts.map(p => p.off)), lo = Math.min(0, ...pts.map(p => p.off));
       if (hi > 0) sv.dimV(cC, yOf(hi), datumY, fmt(hi), 'r', 'Datum to top point');
       if (lo < 0) sv.dimV(cC, datumY, yOf(lo), fmt(lo), 'r', 'Datum to bottom point');
-      sv.dimV(cD, top, top + L * s, fmt(L) + (num(v.lengthAlt) > 0 ? '/' + fmt(num(v.lengthAlt)) : ''), 'r', 'Overall length');
+      sv.dimV(cD, top, top + L * s, (num(v.lengthAlt) > 0 && num(v.length) > 0 && num(v.lengthAlt) !== num(v.length) ? fmt(num(v.length)) + '/' + fmt(num(v.lengthAlt)) : fmt(L)), 'r', 'Overall length');
 
       const w = cD + (num(v.lengthAlt) > 0 ? 130 : 80), bottom = top + L * s + 45;
       sv.titleBlock(w, bottom, v);
@@ -455,7 +459,7 @@ function defaults(key) {
   const v = {};
   [...COMMON, ...TEMPLATES[key].fields].forEach(f => { if (f.k) v[f.k] = clone(f.def ?? ''); });
   v.title = TEMPLATES[key].title;
-  v.ver = 2;
+  v.ver = 3;
   v.hide = Object.fromEntries((TEMPLATES[key].defaultHide || []).map(k => [k, true]));
   return v;
 }
@@ -478,7 +482,13 @@ function migrate(v) {
   return v;
 }
 // Saves from before the faceplate default changed from 20 to 10 get the new width once.
-function fixOld(sv) { if (sv && !sv.ver && Number(sv.forendW) === 20) sv.forendW = 10; return sv; }
+function fixOld(sv) {
+  if (!sv) return sv;
+  if (!sv.ver && Number(sv.forendW) === 20) sv.forendW = 10;
+  // the datum used to be pinned 760/785/832mm from the top; centre the locking points instead
+  if ((sv.ver || 0) < 3 && sv.points) { if ([760, 785, 832].includes(Number(sv.topToDatum))) sv.topToDatum = 0; sv.ver = 3; }
+  return sv;
+}
 function load(key) {
   let v = defaults(key);
   try { Object.assign(v, fixOld(JSON.parse(LS.get('mtxdraw:' + key) || '{}'))); } catch (e) {}
