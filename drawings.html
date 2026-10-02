@@ -191,7 +191,11 @@ const TEMPLATES = {
       { k: 'length', label: 'Overall faceplate length', type: 'num', def: 1770 },
       { k: 'lengthAlt', label: 'Alternative overall length (0 = none)', type: 'num', def: 2100 },
       { k: 'topToDatum', label: 'Top of faceplate to datum (0 = centre the locking points)', type: 'num', def: 0 },
-      { k: 'forendW', label: 'Faceplate width (drawn)', type: 'num', def: 10 },
+      { k: 'forendW', label: 'Faceplate thickness shown in the side view', type: 'num', def: 10 },
+      { k: 'faceType', label: 'Face bar type', type: 'select', opts: ['radius', 'square'], def: 'radius' },
+      { k: 'faceW', label: 'Face bar width', type: 'num', def: 20 },
+      { k: 'faceR', label: 'Face bar corner radius (radius type)', type: 'num', def: 5 },
+      { k: 'faceView', label: 'Show face bar view', type: 'check', def: true },
       { hint: 'The datum is the reference line that locking points are measured from (offsets are positive above it, negative below). With the datum set to 0 the locking points stay centred on the faceplate when you change its length. If an alternative length is set, the faceplate is drawn at the longer one.' },
       { sec: 'Gearbox case' },
       { k: 'caseH', label: 'Case height', type: 'num', def: 185 },
@@ -293,7 +297,24 @@ const TEMPLATES = {
       if (lo < 0) sv.dimV(cC, datumY, yOf(lo), fmt(lo), 'r', 'Datum to bottom point');
       sv.dimV(cD, top, top + L * s, (num(v.lengthAlt) > 0 && num(v.length) > 0 && num(v.lengthAlt) !== num(v.length) ? fmt(num(v.length)) + '/' + fmt(num(v.lengthAlt)) : fmt(L)), 'r', 'Overall length');
 
-      const w = cD + (num(v.lengthAlt) > 0 ? 130 : 80), bottom = top + L * s + 45;
+      // face bar: enlarged view of the end of the bar showing its width and whether it is radius or square ended
+      let w = cD + (num(v.lengthAlt) > 0 ? 130 : 80);
+      const fw = num(v.faceW);
+      if (v.faceView !== false && fw > 0) {
+        const k = 3, wd = fw * k, ld = 230, sq = v.faceType === 'square', rd = sq ? 0 : Math.min(Math.max(num(v.faceR), 0), fw / 2) * k;
+        const x0d = cD + (num(v.lengthAlt) > 0 ? 160 : 110), y0d = top + 30;
+        const q = (cx, cy, ex, ey) => rd > 0 ? `Q${cx} ${cy} ${ex} ${ey}` : `L${ex} ${ey}`;
+        sv.text(x0d + wd / 2, y0d - 62, 'FACE BAR', 'font-size="11" text-anchor="middle" fill="#666"');
+        sv.add(`<path d="M${x0d} ${y0d + ld} L${x0d} ${y0d + rd} ${q(x0d, y0d, x0d + rd, y0d)} L${x0d + wd - rd} ${y0d} ${q(x0d + wd, y0d, x0d + wd, y0d + rd)} L${x0d + wd} ${y0d + ld} L${x0d + wd * .75} ${y0d + ld + 8} L${x0d + wd * .5} ${y0d + ld - 8} L${x0d + wd * .25} ${y0d + ld + 8} Z" ${OUT} stroke-linejoin="round"/>`);
+        sv.dimH(y0d - 20, x0d, x0d + wd, fmt(fw), 't', 'r', 'Face bar width');
+        if (!sq && rd > 0 && sv.reg('Face bar corner radius', 'R' + fmt(num(v.faceR)))) {
+          sv.line(x0d + rd * .3, y0d + rd * .3, x0d - 18, y0d - 8, 'stroke="#e00000" stroke-width="1"');
+          sv.text(x0d - 22, y0d - 4, 'R' + fmt(num(v.faceR)), 'font-size="13" font-weight="bold" text-anchor="end" paint-order="stroke" stroke="#fff" stroke-width="3"');
+        }
+        sv.text(x0d + wd / 2, y0d + ld + 36, sq ? 'Square ended' : 'Radius ended', 'font-size="12" text-anchor="middle" fill="#444"');
+        w = Math.max(w, x0d + wd + 110);
+      }
+      const bottom = top + L * s + 45;
       sv.titleBlock(w, bottom, v);
       return { svg: sv.finish(w, bottom + 84), warns, dims: sv.dims };
     },
