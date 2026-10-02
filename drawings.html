@@ -149,7 +149,6 @@ const SHAPES = {
   // traced from a manufacturer drawing: a wide arc sweeps out of the faceplate to an angled beak,
   // steps back in with a notch, and returns along a short arm. Roughly square, so height follows width.
   hook:       { w: 23, h: 0, minW: 24, aspect: 1.07, path: (w, h) => { const P = (U, V) => [U * w, (V - .5) * h]; return [['M', P(0, 0)], ['C', P(.45, .02), P(.9, .35), P(1, .8)], ['L', P(.66, 1)], ['L', P(.53, 1)], ['L', P(.51, .69)], ['Q', P(.25, .68), P(0, .55)], ['Z']]; } },
-  'hook-up':  { w: 23, h: 0, minW: 24, aspect: 1.07, flip: true, path: (w, h) => SHAPES.hook.path(w, h) },
   roller:     { w: 20, h: 16, custom: true },
   mushroom:   { w: 16, h: 18, poly: (w, h) => { const st = h * .16, c = h * .12, u = w * .5; return [[0, -st], [u, -st], [u, -h/2 + c], [u + c, -h/2], [w - c, -h/2], [w, -h/2 + c], [w, h/2 - c], [w - c, h/2], [u + c, h/2], [u, h/2 - c], [u, st], [0, st]]; } },
   pin:        { w: 14, h: 12, poly: (w, h) => { const a = h / 2, c = h * .22; return [[0, -a], [w - c, -a], [w, -a + c], [w, a - c], [w - c, a], [0, a]]; } },
@@ -162,9 +161,9 @@ function ptSize(type, s, wMm, hMm) {
   const w = Math.max(sh.minW || 12, wMm * s);
   return { w, h: hMm > 0 ? Math.max(sh.minH || 12, hMm * s) : sh.aspect ? w * sh.aspect : Math.max(sh.minH || 12, sh.h * s) };
 }
-function drawPoint(sv, plateL, cy, type, s, wMm, hMm) {
+function drawPoint(sv, plateL, cy, type, s, wMm, hMm, flip) {
   const sh = SHAPES[type] || SHAPES.hook, { w, h } = ptSize(type, s, wMm, hMm);
-  const X = u => +(plateL - u).toFixed(2), Y = v => +(cy + (sh.flip ? -v : v)).toFixed(2);
+  const X = u => +(plateL - u).toFixed(2), Y = v => +(cy + (flip ? -v : v)).toFixed(2);
   const poly = pts => sv.add(`<polygon points="${pts.map(([u, v]) => X(u) + ',' + Y(v)).join(' ')}" ${OUT} stroke-linejoin="round"/>`);
   if (sh.path) {
     const d = sh.path(w, h).map(([c, ...ps]) => c + ps.map(([u, v]) => X(u) + ' ' + Y(v)).join(' ')).join(' ');
@@ -182,7 +181,7 @@ const TEMPLATES = {
   multi: {
     name: 'Multipoint lock',
     title: 'Multipoint Lock',
-    defaultHide: ['Case depth', 'Point 3 (deadbolt) sticks out', 'Point 3 (deadbolt) height', 'Point 4 (hook-up) box height', 'Point 4 (hook-up) sticks out', 'Point 4 (hook-up) box depth'],
+    defaultHide: ['Case depth', 'Point 3 (deadbolt) sticks out', 'Point 3 (deadbolt) height', 'Point 4 (hook) box height', 'Point 4 (hook) sticks out', 'Point 4 (hook) box depth'],
     fields: [
       { sec: 'Faceplate' },
       { k: 'length', label: 'Overall faceplate length', type: 'num', def: 1770 },
@@ -206,18 +205,19 @@ const TEMPLATES = {
         def: [{ off: 92, size: 8, dim: true }],
         add: { off: 0, size: 8, dim: true } },
       { sec: 'Locking points' },
-      { hint: 'Offset = centre of the part from the datum. Out = how far it sticks out of the faceplate and Height = its height (0 = standard size). Box H and Box D draw a box behind the faceplate (0 = no box). Chain adds it to the left-hand offset chain. Each size is listed under “Dimensions shown” at the bottom, where you can hide any of them.' },
+      { hint: 'Offset = centre of the part from the datum. Out = how far it sticks out of the faceplate and Height = its height (0 = standard size). Box H and Box D draw a box behind the faceplate (0 = no box). Chain adds it to the left-hand offset chain. For hooks, Hook at puts the hook at the top, middle or bottom of its box and Flip turns it upside down. Each size is listed under “Dimensions shown” at the bottom, where you can hide any of them.' },
       { k: 'points', type: 'list', cols: [
           { k: 'type', label: 'Type', type: 'select', opts: Object.keys(SHAPES), wide: true },
           { k: 'off', label: 'Offset', type: 'num' }, { k: 'proj', label: 'Out', type: 'num' },
           { k: 'h', label: 'Height', type: 'num' }, { k: 'bh', label: 'Box H', type: 'num' },
-          { k: 'bd', label: 'Box D', type: 'num' }, { k: 'chain', label: 'Chain', type: 'check' }],
+          { k: 'bd', label: 'Box D', type: 'num' }, { k: 'chain', label: 'Chain', type: 'check' },
+          { k: 'pos', label: 'Hook at', type: 'select', opts: ['bottom', 'middle', 'top'] }, { k: 'flip', label: 'Flip hook', type: 'check' }],
         def: [
-          { type: 'hook', off: 720, proj: 23, h: 0, bh: 113, bd: 45, chain: false },
-          { type: 'latch', off: 60, proj: 20, h: 10, bh: 0, bd: 0, chain: false },
-          { type: 'deadbolt', off: -35, proj: 20, h: 30, bh: 0, bd: 0, chain: false },
-          { type: 'hook-up', off: -770, proj: 23, h: 0, bh: 113, bd: 45, chain: false }],
-        add: { type: 'hook', off: 0, proj: 0, h: 0, bh: 0, bd: 0, chain: false } },
+          { type: 'hook', off: 720, proj: 23, h: 0, bh: 113, bd: 45, chain: false, pos: 'bottom', flip: false },
+          { type: 'latch', off: 60, proj: 20, h: 10, bh: 0, bd: 0, chain: false, pos: 'bottom', flip: false },
+          { type: 'deadbolt', off: -35, proj: 20, h: 30, bh: 0, bd: 0, chain: false, pos: 'bottom', flip: false },
+          { type: 'hook', off: -770, proj: 23, h: 0, bh: 113, bd: 45, chain: false, pos: 'bottom', flip: false }],
+        add: { type: 'hook', off: 0, proj: 0, h: 0, bh: 0, bd: 0, chain: false, pos: 'bottom', flip: false } },
     ],
     draw(v) {
       const L = num(v.length), warns = [];
@@ -231,18 +231,21 @@ const TEMPLATES = {
       const maxOff = num(v.topToDatum), minOff = -(L - num(v.topToDatum));
       const pts = v.points.map(p => ({
         type: SHAPES[p.type] ? p.type : 'hook', off: num(p.off), proj: num(p.proj), h: num(p.h), bh: num(p.bh), bd: num(p.bd),
-        chain: !!(p.chain ?? p.dim),
+        chain: !!(p.chain ?? p.dim), pos: p.pos || (p.type === 'hook-up' ? 'top' : 'bottom'), flip: p.type === 'hook-up' ? true : !!p.flip,
       }));
       pts.forEach((p, i) => {
-        const pn = `Point ${i + 1} (${p.type})`, sh = SHAPES[p.type], isHook = p.type.startsWith('hook'), down = p.type !== 'hook-up';
+        const pn = `Point ${i + 1} (${p.type})`, sh = SHAPES[p.type], isHook = p.type === 'hook';
         const cy = yOf(p.off), box = p.bh > 0 && p.bd > 0, bhp = p.bh * s * .73, endX = plateL + Math.max(p.bd * s * .85, pw + 12); // box proportions measured from the original drawings (schematic, not true scale)
         const projMm = p.proj || sh.w, hMm = p.h || sh.h; // hooks have h = 0: their height follows their width
         if (p.off + Math.max(box ? p.bh : 0, hMm) / 2 > maxOff || p.off - Math.max(box ? p.bh : 0, hMm) / 2 < minOff)
           warns.push(`A ${p.type} at ${p.off}mm runs off the faceplate.`);
         if (box) sv.rect(plateR, cy - bhp / 2, endX - plateR, bhp, OUT);
-        let by = cy; // a hook sits flush with the open end of its box
-        if (isHook && box) { const hp = ptSize(p.type, s, projMm, hMm).h; const gap = bhp * .06; by = down ? cy + bhp / 2 - hp / 2 - gap : cy - bhp / 2 + hp / 2 + gap; }
-        const d = drawPoint(sv, plateL, by, p.type, s, projMm, hMm);
+        let by = cy; // a hook sits at the bottom, middle or top of its box
+        if (isHook && box) {
+          const hp = ptSize(p.type, s, projMm, hMm).h, gap = bhp * .06;
+          by = p.pos === 'top' ? cy - bhp / 2 + hp / 2 + gap : p.pos === 'middle' ? cy : cy + bhp / 2 - hp / 2 - gap;
+        }
+        const d = drawPoint(sv, plateL, by, p.type, s, projMm, hMm, isHook && p.flip);
         { // every measure is registered, so each one can be shown or hidden from the Dimensions list
           if (box) sv.dimV(endX + 30, cy - bhp / 2, cy + bhp / 2, fmt(p.bh), 'r', pn + ' box height');
           if (p.h > 0) sv.dimV(plateL - d.w - 28, by - d.h / 2, by + d.h / 2, fmt(p.h), 'l', pn + ' height');
@@ -461,6 +464,11 @@ let state = {};
 // Older saves had one "Size dims" tick per point; turn an unticked one into hidden dimensions.
 function migrate(v) {
   if (!v.hide) v.hide = {};
+  if (Array.isArray(v.points)) v.points.forEach((p, i) => { // 'hook-up' became hook + Hook at top + Flip
+    if (p.type !== 'hook-up') return;
+    p.type = 'hook'; p.pos = 'top'; p.flip = true;
+    Object.keys(v.hide).forEach(k => { if (k.startsWith(`Point ${i + 1} (hook-up)`)) { v.hide[k.replace('(hook-up)', '(hook)')] = true; delete v.hide[k]; } });
+  });
   if (Array.isArray(v.points) && v.points.some(p => 'sd' in p)) {
     v.points.forEach((p, i) => {
       if (p.sd === false) [' box height', ' height', ' sticks out', ' box depth'].forEach(m => { v.hide[`Point ${i + 1} (${p.type})` + m] = true; });
